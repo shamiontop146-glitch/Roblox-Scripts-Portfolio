@@ -1,0 +1,1252 @@
+--!strict
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local MarketplaceService = game:GetService("MarketplaceService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local DataController = require(script.Parent:WaitForChild("DataController"))
+local abilityRemote: RemoteEvent = Remotes.Ability
+
+local AbilityController = {}
+
+local abilities: { [string]: any } = {}
+
+local ABILITY_SLOT_2_GAMEPASS_ID = 1953634255
+
+local ABILITY_IMAGES = {
+	Dash = "rbxassetid://86889060985384",
+	Heal = "rbxassetid://73080282311874",
+	ForceField = "rbxassetid://118545785299126",
+	Invisibility = "rbxassetid://86889060985384",
+	LifeSteal = "rbxassetid://86889060985384",
+	LassoPull = "rbxassetid://86889060985384",
+	Flashstep = "rbxassetid://86889060985384",
+	Blitz = "rbxassetid://86889060985384",
+	Prodigy = "rbxassetid://86889060985384",
+}
+
+local function loadAbilities()
+	local folder = Shared:FindFirstChild("Abilities")
+
+	if not folder then
+		return
+	end
+
+	for _, moduleScript in folder:GetChildren() do
+		if moduleScript:IsA("ModuleScript") then
+			local ok, ability =
+				pcall(require, moduleScript)
+
+			if ok
+				and type(ability) == "table"
+				and ability.id
+			then
+				abilities[ability.id] =
+					ability
+			end
+		end
+	end
+end
+
+function AbilityController.start()
+	loadAbilities()
+
+	local player =
+		Players.LocalPlayer
+
+	local playerGui =
+		player:WaitForChild("PlayerGui")
+
+	local screenGui =
+		playerGui:WaitForChild("RoundGUI")
+
+	local abilityFrame =
+		screenGui:WaitForChild("Ability")
+
+	local primaryButton =
+		abilityFrame:WaitForChild("1") :: GuiButton
+
+	local secondaryButton =
+		abilityFrame:WaitForChild("2") :: GuiButton
+
+	local primaryKeyLabel =
+		primaryButton:WaitForChild(
+			"AbilityKey"
+		) :: TextLabel
+
+	local primaryAbilityLabel =
+		primaryButton:WaitForChild(
+			"AbilityLabel"
+		) :: ImageLabel
+
+	local primaryCooldownOverlay =
+		primaryButton:WaitForChild(
+			"Cooldown"
+		) :: ImageLabel
+
+	local secondaryKeyLabel =
+		secondaryButton:WaitForChild(
+			"AbilityKey"
+		) :: TextLabel
+
+	local secondaryAbilityLabel =
+		secondaryButton:WaitForChild(
+			"AbilityLabel"
+		) :: ImageLabel
+
+	local secondaryCooldownOverlay =
+		secondaryButton:WaitForChild(
+			"Cooldown"
+		) :: ImageLabel
+
+	local chainObjects = {}
+
+	for _, object in ipairs(
+		secondaryButton:GetDescendants()
+		) do
+		local lowerName =
+			string.lower(object.Name)
+
+		if string.find(
+			lowerName,
+			"chain",
+			1,
+			true
+			)
+				or string.find(
+					lowerName,
+					"lock",
+					1,
+					true
+				)
+		then
+			if object:IsA("GuiObject") then
+				table.insert(
+					chainObjects,
+					object
+				)
+			end
+		end
+	end
+
+	local function setChainVisible(
+		visible: boolean
+	)
+		for _, object in ipairs(
+			chainObjects
+			) do
+			object.Visible =
+				visible
+		end
+	end
+
+	primaryCooldownOverlay.ZIndex =
+		10
+
+	primaryCooldownOverlay.ImageTransparency =
+		1
+
+	secondaryCooldownOverlay.ZIndex =
+		10
+
+	secondaryCooldownOverlay.ImageTransparency =
+		1
+
+	local primaryPrimedOverlay =
+		Instance.new("Frame")
+
+	primaryPrimedOverlay.Name =
+		"LassoPullPrimed"
+
+	primaryPrimedOverlay.Size =
+		UDim2.new(
+			1,
+			0,
+			1,
+			0
+		)
+
+	primaryPrimedOverlay.Position =
+		UDim2.new(
+			0,
+			0,
+			0,
+			0
+		)
+
+	primaryPrimedOverlay.BackgroundColor3 =
+		Color3.new(
+			0,
+			0,
+			0
+		)
+
+	primaryPrimedOverlay.BackgroundTransparency =
+		0.45
+
+	primaryPrimedOverlay.BorderSizePixel =
+		0
+
+	primaryPrimedOverlay.ZIndex =
+		11
+
+	primaryPrimedOverlay.Visible =
+		false
+
+	primaryPrimedOverlay.Parent =
+		primaryButton
+
+	local secondaryPrimedOverlay =
+		Instance.new("Frame")
+
+	secondaryPrimedOverlay.Name =
+		"LassoPullPrimed"
+
+	secondaryPrimedOverlay.Size =
+		UDim2.new(
+			1,
+			0,
+			1,
+			0
+		)
+
+	secondaryPrimedOverlay.Position =
+		UDim2.new(
+			0,
+			0,
+			0,
+			0
+		)
+
+	secondaryPrimedOverlay.BackgroundColor3 =
+		Color3.new(
+			0,
+			0,
+			0
+		)
+
+	secondaryPrimedOverlay.BackgroundTransparency =
+		0.45
+
+	secondaryPrimedOverlay.BorderSizePixel =
+		0
+
+	secondaryPrimedOverlay.ZIndex =
+		11
+
+	secondaryPrimedOverlay.Visible =
+		false
+
+	secondaryPrimedOverlay.Parent =
+		secondaryButton
+
+	local primaryCooldownLabel =
+		Instance.new("TextLabel")
+
+	primaryCooldownLabel.Name =
+		"CooldownLabel"
+
+	primaryCooldownLabel.Size =
+		UDim2.new(
+			0.5,
+			0,
+			0.5,
+			0
+		)
+
+	primaryCooldownLabel.Position =
+		UDim2.new(
+			0.5,
+			0,
+			0.5,
+			0
+		)
+
+	primaryCooldownLabel.AnchorPoint =
+		Vector2.new(
+			0.5,
+			0.5
+		)
+
+	primaryCooldownLabel.BackgroundTransparency =
+		1
+
+	primaryCooldownLabel.TextColor3 =
+		Color3.new(
+			1,
+			1,
+			1
+		)
+
+	primaryCooldownLabel.TextScaled =
+		true
+
+	primaryCooldownLabel.FontFace =
+		Font.new(
+			"rbxasset://fonts/families/Montserrat.json",
+			Enum.FontWeight.Bold
+		)
+
+	primaryCooldownLabel.TextStrokeColor3 =
+		Color3.new(
+			0,
+			0,
+			0
+		)
+
+	primaryCooldownLabel.TextStrokeTransparency =
+		0
+
+	primaryCooldownLabel.ZIndex =
+		12
+
+	primaryCooldownLabel.Visible =
+		false
+
+	primaryCooldownLabel.Parent =
+		primaryButton
+
+	local secondaryCooldownLabel =
+		Instance.new("TextLabel")
+
+	secondaryCooldownLabel.Name =
+		"CooldownLabel"
+
+	secondaryCooldownLabel.Size =
+		UDim2.new(
+			0.5,
+			0,
+			0.5,
+			0
+		)
+
+	secondaryCooldownLabel.Position =
+		UDim2.new(
+			0.5,
+			0,
+			0.5,
+			0
+		)
+
+	secondaryCooldownLabel.AnchorPoint =
+		Vector2.new(
+			0.5,
+			0.5
+		)
+
+	secondaryCooldownLabel.BackgroundTransparency =
+		1
+
+	secondaryCooldownLabel.TextColor3 =
+		Color3.new(
+			1,
+			1,
+			1
+		)
+
+	secondaryCooldownLabel.TextScaled =
+		true
+
+	secondaryCooldownLabel.FontFace =
+		Font.new(
+			"rbxasset://fonts/families/Montserrat.json",
+			Enum.FontWeight.Bold
+		)
+
+	secondaryCooldownLabel.TextStrokeColor3 =
+		Color3.new(
+			0,
+			0,
+			0
+		)
+
+	secondaryCooldownLabel.TextStrokeTransparency =
+		0
+
+	secondaryCooldownLabel.ZIndex =
+		12
+
+	secondaryCooldownLabel.Visible =
+		false
+
+	secondaryCooldownLabel.Parent =
+		secondaryButton
+
+	local currentAbilityId =
+		"Dash"
+
+	local currentAbility2Id =
+		""
+
+	local isOnCooldown =
+		false
+
+	local ownsSlot2 =
+		false
+
+	local ownershipConfirmed =
+		false
+
+	local ownershipCheckInProgress =
+		false
+
+	local lassoPullPrimed =
+		false
+
+	local lassoPullPrimedSlot: number? =
+		nil
+
+	local lassoAttributeConnection:
+		RBXScriptConnection? = nil
+
+	local currentInputType =
+		UserInputService:GetLastInputType()
+
+	local function setLassoPrimedVisual(
+		slot: number?,
+		visible: boolean
+	)
+		primaryPrimedOverlay.Visible =
+			false
+
+		secondaryPrimedOverlay.Visible =
+			false
+
+		if not visible
+			or not slot
+		then
+			return
+		end
+
+		if slot == 1 then
+			primaryPrimedOverlay.Visible =
+				true
+		elseif slot == 2 then
+			secondaryPrimedOverlay.Visible =
+				true
+		end
+	end
+
+	local function clearLassoPrimed()
+		lassoPullPrimed =
+			false
+
+		lassoPullPrimedSlot =
+			nil
+
+		setLassoPrimedVisual(
+			nil,
+			false
+		)
+	end
+
+	local function startSharedCooldown(
+		duration: number
+	)
+		if duration <= 0 then
+			return
+		end
+
+		isOnCooldown =
+			true
+
+		clearLassoPrimed()
+
+		primaryButton.Interactable =
+			false
+
+		secondaryButton.Interactable =
+			false
+
+		primaryCooldownOverlay.Size =
+			UDim2.new(
+				1,
+				0,
+				1,
+				0
+			)
+
+		primaryCooldownOverlay.Position =
+			UDim2.new(
+				0,
+				0,
+				0,
+				0
+			)
+
+		secondaryCooldownOverlay.Size =
+			UDim2.new(
+				1,
+				0,
+				1,
+				0
+			)
+
+		secondaryCooldownOverlay.Position =
+			UDim2.new(
+				0,
+				0,
+				0,
+				0
+			)
+
+		primaryCooldownOverlay.ImageTransparency =
+			0.5
+
+		secondaryCooldownOverlay.ImageTransparency =
+			0.5
+
+		primaryCooldownLabel.Visible =
+			true
+
+		secondaryCooldownLabel.Visible =
+			true
+
+		local fadeTweenPrimary =
+			TweenService:Create(
+				primaryCooldownOverlay,
+				TweenInfo.new(
+					duration,
+					Enum.EasingStyle.Linear
+				),
+				{
+					ImageTransparency =
+					1,
+				}
+			)
+
+		local fadeTweenSecondary =
+			TweenService:Create(
+				secondaryCooldownOverlay,
+				TweenInfo.new(
+					duration,
+					Enum.EasingStyle.Linear
+				),
+				{
+					ImageTransparency =
+					1,
+				}
+			)
+
+		fadeTweenPrimary:Play()
+		fadeTweenSecondary:Play()
+
+		local endTime =
+			os.clock() + duration
+
+		while true do
+			local remaining =
+				math.max(
+					0,
+					endTime - os.clock()
+				)
+
+			local text =
+				string.format(
+					"%.1f",
+					remaining
+				)
+
+			primaryCooldownLabel.Text =
+				text
+
+			secondaryCooldownLabel.Text =
+				text
+
+			if remaining <= 0 then
+				break
+			end
+
+			task.wait(0.05)
+		end
+
+		primaryCooldownOverlay.ImageTransparency =
+			1
+
+		secondaryCooldownOverlay.ImageTransparency =
+			1
+
+		primaryCooldownLabel.Visible =
+			false
+
+		secondaryCooldownLabel.Visible =
+			false
+
+		primaryButton.Interactable =
+			true
+
+		secondaryButton.Interactable =
+			true
+
+		isOnCooldown =
+			false
+
+		refreshSecondaryVisuals()
+	end
+
+	local function primeLassoPull(
+		slot: number
+	)
+		lassoPullPrimed =
+			true
+
+		lassoPullPrimedSlot =
+			slot
+
+		setLassoPrimedVisual(
+			slot,
+			true
+		)
+	end
+
+	local function updateAbilityImages()
+		local primaryImage =
+			ABILITY_IMAGES[currentAbilityId]
+
+		if primaryImage then
+			primaryAbilityLabel.Image =
+				primaryImage
+		else
+			primaryAbilityLabel.Image =
+				""
+		end
+
+		if ownsSlot2
+			and currentAbility2Id ~= ""
+		then
+			local secondaryImage =
+				ABILITY_IMAGES[currentAbility2Id]
+
+			if secondaryImage then
+				secondaryAbilityLabel.Image =
+					secondaryImage
+
+				secondaryAbilityLabel.Visible =
+					true
+			else
+				secondaryAbilityLabel.Image =
+					""
+
+				secondaryAbilityLabel.Visible =
+					false
+			end
+		else
+			secondaryAbilityLabel.Image =
+				""
+
+			secondaryAbilityLabel.Visible =
+				false
+		end
+	end
+
+	local function updateSecondaryLockState()
+		if ownsSlot2 then
+			setChainVisible(false)
+
+			secondaryAbilityLabel.Visible =
+				currentAbility2Id ~= ""
+
+			secondaryButton.Active =
+				true
+
+			secondaryButton.Interactable =
+				true
+		else
+			setChainVisible(true)
+
+			secondaryAbilityLabel.Image =
+				""
+
+			secondaryAbilityLabel.Visible =
+				false
+
+			secondaryButton.Active =
+				true
+
+			secondaryButton.Interactable =
+				true
+		end
+	end
+
+	local function refreshSecondaryVisuals()
+		updateSecondaryLockState()
+		updateAbilityImages()
+	end
+
+	local function updateKeyDisplay()
+		if currentInputType ==
+			Enum.UserInputType.Touch
+		then
+			primaryKeyLabel.Visible =
+				false
+
+			secondaryKeyLabel.Visible =
+				false
+
+		elseif currentInputType ==
+			Enum.UserInputType.Gamepad1
+			or currentInputType ==
+			Enum.UserInputType.Gamepad2
+			or currentInputType ==
+			Enum.UserInputType.Gamepad3
+			or currentInputType ==
+			Enum.UserInputType.Gamepad4
+		then
+			primaryKeyLabel.Visible =
+				true
+
+			primaryKeyLabel.Text =
+				"X"
+
+			secondaryKeyLabel.Visible =
+				true
+
+			secondaryKeyLabel.Text =
+				"?"
+
+		else
+			primaryKeyLabel.Visible =
+				true
+
+			primaryKeyLabel.Text =
+				"Q"
+
+			secondaryKeyLabel.Visible =
+				true
+
+			secondaryKeyLabel.Text =
+				"E"
+		end
+	end
+
+	local function refreshSlot2Ownership(
+		forceCheck: boolean
+	): boolean
+		if ownsSlot2
+			and ownershipConfirmed
+		then
+			refreshSecondaryVisuals()
+			return true
+		end
+
+		if ownershipCheckInProgress then
+			return ownsSlot2
+		end
+
+		ownershipCheckInProgress =
+			true
+
+		local success, result =
+			pcall(function()
+				return MarketplaceService:UserOwnsGamePassAsync(
+					player.UserId,
+					ABILITY_SLOT_2_GAMEPASS_ID
+				)
+			end)
+
+		ownershipCheckInProgress =
+			false
+
+		if success then
+			if result == true then
+				ownsSlot2 =
+					true
+
+				ownershipConfirmed =
+					true
+			elseif forceCheck then
+				ownsSlot2 =
+					false
+
+				ownershipConfirmed =
+					true
+			end
+		end
+
+		refreshSecondaryVisuals()
+
+		return ownsSlot2
+	end
+
+	local function refreshLassoPullState(
+		character: Model?
+	)
+		if lassoAttributeConnection then
+			lassoAttributeConnection:Disconnect()
+			lassoAttributeConnection =
+				nil
+		end
+
+		clearLassoPrimed()
+
+		if not character then
+			return
+		end
+
+		lassoAttributeConnection =
+			character:GetAttributeChangedSignal(
+				"LassoPullActive"
+			):Connect(
+			function()
+				local active =
+					character:GetAttribute(
+						"LassoPullActive"
+					) == true
+
+				if active then
+					local slot: number? =
+						nil
+
+					if currentAbilityId ==
+						"LassoPull"
+					then
+						slot = 1
+					elseif currentAbility2Id ==
+						"LassoPull"
+					then
+						slot = 2
+					end
+
+					if slot then
+						primeLassoPull(
+							slot
+						)
+					end
+				else
+					if lassoPullPrimed then
+						local slot =
+							lassoPullPrimedSlot
+
+						clearLassoPrimed()
+
+						local abilityId =
+							if slot == 1
+							then currentAbilityId
+							else currentAbility2Id
+
+						local ability =
+							abilities[abilityId]
+
+						if ability
+							and ability.id ==
+							"LassoPull"
+						then
+							task.spawn(
+								startSharedCooldown,
+								ability.cooldown
+							)
+						end
+					end
+				end
+			end
+		)
+
+		if character:GetAttribute(
+			"LassoPullActive"
+			) == true
+		then
+			local slot: number? =
+				nil
+
+			if currentAbilityId ==
+				"LassoPull"
+			then
+				slot = 1
+			elseif currentAbility2Id ==
+				"LassoPull"
+			then
+				slot = 2
+			end
+
+			if slot then
+				primeLassoPull(
+					slot
+				)
+			end
+		end
+	end
+
+	local function refreshEquipped()
+		local data =
+			DataController.get()
+
+		if data
+			and data.Equipped
+		then
+			if type(
+				data.Equipped.Ability
+				) == "string"
+					and data.Equipped.Ability ~= ""
+			then
+				currentAbilityId =
+					data.Equipped.Ability
+			else
+				currentAbilityId =
+					"Dash"
+			end
+
+			if type(
+				data.Equipped.Ability2
+				) == "string"
+					and data.Equipped.Ability2 ~= ""
+			then
+				currentAbility2Id =
+					data.Equipped.Ability2
+			else
+				currentAbility2Id =
+					""
+			end
+		else
+			currentAbilityId =
+				"Dash"
+
+			currentAbility2Id =
+				""
+		end
+
+		updateAbilityImages()
+		updateSecondaryLockState()
+
+		refreshLassoPullState(
+			player.Character
+		)
+	end
+
+	updateKeyDisplay()
+
+	UserInputService.LastInputTypeChanged:Connect(
+		function(lastInputType)
+			currentInputType =
+				lastInputType
+
+			updateKeyDisplay()
+		end
+	)
+
+	DataController.onChanged(
+		refreshEquipped
+	)
+
+	refreshEquipped()
+
+	refreshSlot2Ownership(true)
+
+	player:GetAttributeChangedSignal(
+		"InMatch"
+	):Connect(function()
+		if player:GetAttribute(
+			"InMatch"
+			) == true
+		then
+			refreshSlot2Ownership(true)
+		else
+			clearLassoPrimed()
+			refreshSlot2Ownership(false)
+		end
+	end)
+
+	player.CharacterAdded:Connect(
+		function(character)
+			refreshLassoPullState(
+				character
+			)
+		end
+	)
+
+	MarketplaceService.PromptGamePassPurchaseFinished:Connect(
+		function(
+			finishedPlayer,
+			passId,
+			purchased
+		)
+			if finishedPlayer ~= player then
+				return
+			end
+
+			if passId ~=
+				ABILITY_SLOT_2_GAMEPASS_ID
+			then
+				return
+			end
+
+			if purchased then
+				ownsSlot2 =
+					true
+
+				ownershipConfirmed =
+					true
+
+				refreshSecondaryVisuals()
+			else
+				refreshSlot2Ownership(
+					true
+				)
+			end
+		end
+	)
+
+	local function activatePrimary()
+		if isOnCooldown then
+			return
+		end
+
+		if lassoPullPrimed then
+			if lassoPullPrimedSlot ==
+				1
+			then
+				return
+			end
+		end
+
+		if not primaryButton.Visible then
+			return
+		end
+
+		if not player:GetAttribute(
+			"InMatch"
+			) then
+			return
+		end
+
+		local ability =
+			abilities[currentAbilityId]
+
+		if not ability then
+			return
+		end
+
+		local character =
+			player.Character
+
+		if not character then
+			return
+		end
+
+		local humanoid =
+			character:FindFirstChildOfClass(
+				"Humanoid"
+			) :: Humanoid?
+
+		if not humanoid
+			or humanoid.Health <= 0
+		then
+			return
+		end
+
+		local hrp =
+			character:FindFirstChild(
+				"HumanoidRootPart"
+			) :: BasePart?
+
+		if not hrp then
+			return
+		end
+
+		local payload =
+			ability.activateClient({
+				player =
+				player,
+
+				character =
+				character,
+
+				humanoid =
+				humanoid,
+
+				hrp =
+				hrp,
+			})
+
+		if ability.id ==
+			"LassoPull"
+			and ability.deferCooldown == true
+		then
+			primeLassoPull(
+				1
+			)
+		else
+			task.spawn(
+				startSharedCooldown,
+				ability.cooldown
+			)
+		end
+
+		abilityRemote:FireServer(
+			currentAbilityId,
+			payload
+		)
+	end
+
+	local function activateSecondary()
+		if not player:GetAttribute(
+			"InMatch"
+			) then
+			return
+		end
+
+		if not refreshSlot2Ownership(
+			true
+			) then
+			MarketplaceService:PromptGamePassPurchase(
+				player,
+				ABILITY_SLOT_2_GAMEPASS_ID
+			)
+
+			return
+		end
+
+		if isOnCooldown then
+			return
+		end
+
+		if lassoPullPrimed then
+			if lassoPullPrimedSlot ==
+				2
+			then
+				return
+			end
+		end
+
+		if not secondaryButton.Visible then
+			return
+		end
+
+		if currentAbility2Id == "" then
+			return
+		end
+
+		local ability =
+			abilities[currentAbility2Id]
+
+		if not ability then
+			return
+		end
+
+		local character =
+			player.Character
+
+		if not character then
+			return
+		end
+
+		local humanoid =
+			character:FindFirstChildOfClass(
+				"Humanoid"
+			) :: Humanoid?
+
+		if not humanoid
+			or humanoid.Health <= 0
+		then
+			return
+		end
+
+		local hrp =
+			character:FindFirstChild(
+				"HumanoidRootPart"
+			) :: BasePart?
+
+		if not hrp then
+			return
+		end
+
+		local payload =
+			ability.activateClient({
+				player =
+				player,
+
+				character =
+				character,
+
+				humanoid =
+				humanoid,
+
+				hrp =
+				hrp,
+			})
+
+		if ability.id ==
+			"LassoPull"
+			and ability.deferCooldown == true
+		then
+			primeLassoPull(
+				2
+			)
+		else
+			task.spawn(
+				startSharedCooldown,
+				ability.cooldown
+			)
+		end
+
+		abilityRemote:FireServer(
+			currentAbility2Id,
+			payload,
+			2
+		)
+	end
+
+	abilityRemote.OnClientEvent:Connect(
+		function(
+			actor,
+			abilityId,
+			payload,
+			slot
+		)
+			local ability =
+				abilities[abilityId]
+
+			if ability
+				and ability.onReplicate
+			then
+				ability.onReplicate({
+					actor =
+						actor,
+
+					payload =
+						payload,
+
+					slot =
+						slot,
+				})
+			end
+		end
+	)
+
+	primaryButton.MouseButton1Click:Connect(
+		activatePrimary
+	)
+
+	secondaryButton.MouseButton1Click:Connect(
+		activateSecondary
+	)
+
+	UserInputService.InputBegan:Connect(
+		function(
+			input,
+			gameProcessed
+		)
+			if gameProcessed then
+				return
+			end
+
+			if input.KeyCode ==
+				Enum.KeyCode.Q
+				or input.KeyCode ==
+				Enum.KeyCode.ButtonX
+			then
+				activatePrimary()
+
+			elseif input.KeyCode ==
+				Enum.KeyCode.E
+			then
+				activateSecondary()
+			end
+		end
+	)
+end
+
+return AbilityController
