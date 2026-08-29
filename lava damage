@@ -1,0 +1,62 @@
+--!strict
+local Workspace = game:GetService("Workspace")
+
+local LavaService = {}
+
+local DAMAGE_PER_SECOND = 5
+local DAMAGE_INTERVAL = 1
+
+local lastDamageTime: { [Instance]: number } = {}
+local lavaConnections: { [Instance]: RBXScriptConnection } = {}
+
+local function onLavaTouched(otherPart: BasePart)
+	local character = otherPart.Parent
+	if not character then
+		return
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid") :: Humanoid?
+	if not humanoid or humanoid.Health <= 0 then
+		return
+	end
+
+	local now = os.clock()
+	local last = lastDamageTime[character]
+
+	if last and (now - last) < DAMAGE_INTERVAL then
+		return
+	end
+
+	lastDamageTime[character] = now
+	humanoid:TakeDamage(DAMAGE_PER_SECOND)
+end
+
+local function connectLavaPart(part: Instance)
+	if part:IsA("BasePart") and string.lower(part.Name) == "lava" then
+		if lavaConnections[part] then
+			return
+		end
+
+		lavaConnections[part] = part.Touched:Connect(onLavaTouched)
+	end
+end
+
+local function disconnectLavaPart(part: Instance)
+	local connection = lavaConnections[part]
+
+	if connection then
+		connection:Disconnect()
+		lavaConnections[part] = nil
+	end
+end
+
+function LavaService.init()
+	for _, descendant in Workspace:GetDescendants() do
+		connectLavaPart(descendant)
+	end
+
+	Workspace.DescendantAdded:Connect(connectLavaPart)
+	Workspace.DescendantRemoving:Connect(disconnectLavaPart)
+end
+
+return LavaService
