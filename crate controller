@@ -1,0 +1,542 @@
+--!strict
+
+local TweenService =
+	game:GetService(
+		"TweenService"
+	)
+
+local SoundService =
+	game:GetService(
+		"SoundService"
+	)
+
+local spinPopup =
+	script.Parent
+
+local main =
+	spinPopup:WaitForChild(
+		"Main"
+	)
+
+local coinsBuy =
+	main:WaitForChild(
+		"CoinsBuy"
+	) :: ImageButton
+
+local bg =
+	main:WaitForChild(
+		"BG"
+	) :: ImageLabel
+
+local scrollingFrame =
+	bg:WaitForChild(
+		"ScrollingFrame"
+	) :: ScrollingFrame
+
+local rolledResultPopUp =
+	spinPopup:WaitForChild(
+		"RolledResultPopUp"
+	) :: TextLabel
+
+local gridLayout =
+	scrollingFrame:WaitForChild(
+		"UIGridLayout"
+	) :: UIGridLayout
+
+local spinSound =
+	Instance.new(
+		"Sound"
+	)
+
+spinSound.Name =
+	"SpinWheelSound"
+
+spinSound.SoundId =
+	"rbxassetid://5406934065"
+
+spinSound.Volume =
+	1
+
+spinSound.Parent =
+	SoundService
+
+local rng =
+	Random.new()
+
+local spinning =
+	false
+
+local SPIN_DURATION =
+	5
+
+local SOUND_PLAYBACK_SPEED =
+	1.25
+
+local RESULT_HOLD_TIME =
+	2.5
+
+local RESULT_TWEEN_IN =
+	0.3
+
+local RESULT_TWEEN_OUT =
+	0.35
+
+local WHIP_CHANCES: {
+	[string]: number
+} = {
+	BarbedWhip = 30,
+	ChainWhip = 20,
+	HookWhip = 15,
+
+	ClawWhip = 10,
+	HammerWhip = 8,
+	SpikedBallWhip = 7,
+
+	CrystalTipWhip = 4,
+	IceWhip = 3,
+
+	MeteorWhip = 2,
+	ScytheWhip = 1,
+}
+
+local originalResultPosition =
+	rolledResultPopUp.Position
+
+local resultHiddenPosition =
+	originalResultPosition
+	+ UDim2.new(
+		0,
+		0,
+		0.08,
+		0
+	)
+
+local originalTextTransparency =
+	rolledResultPopUp.TextTransparency
+
+local originalBackgroundTransparency =
+	rolledResultPopUp.BackgroundTransparency
+
+local function hideResultInstant()
+	rolledResultPopUp.Visible =
+		false
+
+	rolledResultPopUp.Position =
+		resultHiddenPosition
+
+	rolledResultPopUp.TextTransparency =
+		1
+
+	rolledResultPopUp.BackgroundTransparency =
+		1
+end
+
+hideResultInstant()
+
+local function getCards(): { Frame }
+	local cards: { Frame } = {}
+
+	for _, child in ipairs(
+		scrollingFrame:GetChildren()
+		) do
+		if child:IsA("Frame")
+			and WHIP_CHANCES[child.Name]
+		then
+			table.insert(
+				cards,
+				child
+			)
+		end
+	end
+
+	table.sort(
+		cards,
+		function(a, b)
+			return a.LayoutOrder <
+				b.LayoutOrder
+		end
+	)
+
+	return cards
+end
+
+local function getDisplayName(
+	card: Frame
+): string
+	local nameLabel =
+		card:FindFirstChild(
+			"Name",
+			true
+		)
+
+	if nameLabel
+		and nameLabel:IsA("TextLabel")
+		and nameLabel.Text ~= ""
+	then
+		return nameLabel.Text
+	end
+
+	return card.Name
+end
+
+local function rollWhip(
+	cards: { Frame }
+): Frame?
+	local totalChance =
+		0
+
+	for _, card in ipairs(
+		cards
+		) do
+		local chance =
+			WHIP_CHANCES[
+		card.Name
+		]
+
+		if chance
+			and chance > 0
+		then
+			totalChance +=
+				chance
+		end
+	end
+
+	if totalChance <= 0 then
+		warn(
+			"Whip spinner: no valid probabilities."
+		)
+
+		return nil
+	end
+
+	local roll =
+		rng:NextNumber(
+			0,
+			totalChance
+		)
+
+	local accumulated =
+		0
+
+	for _, card in ipairs(
+		cards
+		) do
+		local chance =
+			WHIP_CHANCES[
+		card.Name
+		]
+
+		if chance
+			and chance > 0
+		then
+			accumulated +=
+				chance
+
+			if roll <= accumulated then
+				return card
+			end
+		end
+	end
+
+	return nil
+end
+
+local function waitForLayout()
+	task.wait()
+
+	local size =
+		gridLayout.AbsoluteContentSize
+
+	while size.X <= 0 do
+		task.wait()
+
+		size =
+			gridLayout.AbsoluteContentSize
+	end
+end
+
+local function getMaxCanvasX(): number
+	return math.max(
+		0,
+		scrollingFrame.AbsoluteCanvasSize.X
+		- scrollingFrame.AbsoluteSize.X
+	)
+end
+
+local function getCardCenterInCanvas(
+	card: Frame
+): number
+	local cardLeft =
+		card.AbsolutePosition.X
+	- scrollingFrame.AbsolutePosition.X
+		+ scrollingFrame.CanvasPosition.X
+
+	return cardLeft
+		+ card.AbsoluteSize.X / 2
+end
+
+local function getTargetCanvasX(
+	card: Frame
+): number
+	local cardCenter =
+		getCardCenterInCanvas(
+			card
+		)
+
+	local viewportCenter =
+		scrollingFrame.AbsoluteSize.X
+		/ 2
+
+	return math.clamp(
+		cardCenter
+		- viewportCenter,
+		0,
+		getMaxCanvasX()
+	)
+end
+
+local function showResult(
+	card: Frame
+)
+	local displayName =
+		getDisplayName(
+			card
+		)
+
+	rolledResultPopUp.Text =
+		"YOU GOT "
+		.. string.upper(
+			displayName
+		)
+
+	rolledResultPopUp.Visible =
+		true
+
+	rolledResultPopUp.Position =
+		resultHiddenPosition
+
+	rolledResultPopUp.TextTransparency =
+		1
+
+	rolledResultPopUp.BackgroundTransparency =
+		1
+
+	local tweenIn =
+		TweenService:Create(
+			rolledResultPopUp,
+			TweenInfo.new(
+				RESULT_TWEEN_IN,
+				Enum.EasingStyle.Quint,
+				Enum.EasingDirection.Out
+			),
+			{
+				Position =
+				originalResultPosition,
+
+				TextTransparency =
+				originalTextTransparency,
+
+				BackgroundTransparency =
+				originalBackgroundTransparency,
+			}
+		)
+
+	tweenIn:Play()
+
+	tweenIn.Completed:Wait()
+
+	task.wait(
+		RESULT_HOLD_TIME
+	)
+
+	local tweenOut =
+		TweenService:Create(
+			rolledResultPopUp,
+			TweenInfo.new(
+				RESULT_TWEEN_OUT,
+				Enum.EasingStyle.Quint,
+				Enum.EasingDirection.In
+			),
+			{
+				Position =
+				resultHiddenPosition,
+
+				TextTransparency =
+				1,
+
+				BackgroundTransparency =
+				1,
+			}
+		)
+
+	tweenOut:Play()
+
+	tweenOut.Completed:Wait()
+
+	rolledResultPopUp.Visible =
+		false
+
+	rolledResultPopUp.Position =
+		originalResultPosition
+
+	rolledResultPopUp.TextTransparency =
+		originalTextTransparency
+
+	rolledResultPopUp.BackgroundTransparency =
+		originalBackgroundTransparency
+end
+
+local function resetSpinner()
+	scrollingFrame.CanvasPosition =
+		Vector2.new(
+			0,
+			0
+		)
+end
+
+local function spin()
+	if spinning then
+		return
+	end
+
+	local cards =
+		getCards()
+
+	if #cards == 0 then
+		warn(
+			"Whip spinner: no valid whip cards found."
+		)
+
+		return
+	end
+
+	local winningCard =
+		rollWhip(
+			cards
+		)
+
+	if not winningCard then
+		return
+	end
+
+	spinning = true
+
+	spinSound:Stop()
+
+	spinSound.TimePosition =
+		0
+
+	spinSound.PlaybackSpeed =
+		SOUND_PLAYBACK_SPEED
+
+	spinSound:Play()
+
+	hideResultInstant()
+
+	resetSpinner()
+
+	waitForLayout()
+
+	task.wait(
+		0.1
+	)
+
+	local maxX =
+		getMaxCanvasX()
+
+	if maxX <= 0 then
+		spinSound:Stop()
+
+		showResult(
+			winningCard
+		)
+
+		resetSpinner()
+
+		spinning = false
+
+		return
+	end
+
+	local targetX =
+		getTargetCanvasX(
+			winningCard
+		)
+
+	local currentX =
+		scrollingFrame.CanvasPosition.X
+
+	targetX =
+		math.clamp(
+			targetX,
+			0,
+			maxX
+		)
+
+	if targetX <= currentX then
+		targetX =
+			math.min(
+				maxX,
+				currentX + 1
+			)
+	end
+
+	local tween =
+		TweenService:Create(
+			scrollingFrame,
+			TweenInfo.new(
+				SPIN_DURATION,
+				Enum.EasingStyle.Quint,
+				Enum.EasingDirection.Out
+			),
+			{
+				CanvasPosition =
+				Vector2.new(
+					targetX,
+					0
+				)
+			}
+		)
+
+	tween:Play()
+
+	tween.Completed:Wait()
+
+	task.wait(
+		0.05
+	)
+
+	local exactTargetX =
+		getTargetCanvasX(
+			winningCard
+		)
+
+	exactTargetX =
+		math.clamp(
+			exactTargetX,
+			0,
+			getMaxCanvasX()
+		)
+
+	scrollingFrame.CanvasPosition =
+		Vector2.new(
+			exactTargetX,
+			0
+		)
+
+	spinSound:Stop()
+
+	showResult(
+		winningCard
+	)
+
+	resetSpinner()
+
+	spinning = false
+end
+
+coinsBuy.Activated:Connect(
+	function()
+		spin()
+	end
+)
