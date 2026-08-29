@@ -1,0 +1,600 @@
+--!strict
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local emoteWheel = script.Parent
+
+local Remotes = require(
+	ReplicatedStorage
+		:WaitForChild("Shared")
+		:WaitForChild("Remotes")
+)
+
+local dataRemote: RemoteEvent = Remotes.Data
+local requestDataRemote: RemoteEvent = Remotes.RequestData
+
+local viewportUpdate = emoteWheel:FindFirstChild("ViewportUpdate")
+
+if not viewportUpdate then
+	viewportUpdate = Instance.new("BindableEvent")
+	viewportUpdate.Name = "ViewportUpdate"
+	viewportUpdate.Parent = emoteWheel
+end
+
+local closeWheelEvent = emoteWheel:WaitForChild("CloseWheel")
+
+local emoteAnimations = {
+	TakeL = "rbxassetid://76143359991994",
+}
+
+local currentData = nil
+local characterReady = false
+
+local currentEmoteTrack: AnimationTrack? = nil
+local currentEmoteAnimation: Animation? = nil
+local currentHumanoid: Humanoid? = nil
+
+local movementConnection: RBXScriptConnection? = nil
+local stateConnection: RBXScriptConnection? = nil
+local monitorConnection: RBXScriptConnection? = nil
+
+local function clearViewport(viewport: ViewportFrame)
+	viewport:ClearAllChildren()
+	viewport.CurrentCamera = nil
+end
+
+local function stopCurrentEmote()
+	if currentEmoteTrack then
+		pcall(function()
+			currentEmoteTrack:Stop(0.1)
+			currentEmoteTrack:Destroy()
+		end)
+
+		currentEmoteTrack = nil
+	end
+
+	if currentEmoteAnimation then
+		pcall(function()
+			currentEmoteAnimation:Destroy()
+		end)
+
+		currentEmoteAnimation = nil
+	end
+end
+
+local function disconnectEmoteMovementConnections()
+	if movementConnection then
+		movementConnection:Disconnect()
+		movementConnection = nil
+	end
+
+	if stateConnection then
+		stateConnection:Disconnect()
+		stateConnection = nil
+	end
+
+	if monitorConnection then
+		monitorConnection:Disconnect()
+		monitorConnection = nil
+	end
+end
+
+local function setupEmoteMovementDetection(
+	humanoid: Humanoid
+)
+	disconnectEmoteMovementConnections()
+
+	currentHumanoid = humanoid
+
+	movementConnection =
+		humanoid.Running:Connect(function(speed)
+			if speed > 0.1 then
+				stopCurrentEmote()
+			end
+		end)
+
+	stateConnection =
+		humanoid.StateChanged:Connect(function(
+			_,
+			newState
+		)
+		if newState == Enum.HumanoidStateType.Jumping
+			or newState == Enum.HumanoidStateType.Freefall
+			or newState == Enum.HumanoidStateType.FallingDown
+		then
+			stopCurrentEmote()
+		end
+	end)
+
+	monitorConnection =
+		RunService.Heartbeat:Connect(function()
+			if not currentEmoteTrack then
+				return
+			end
+
+			if not currentEmoteTrack.IsPlaying then
+				return
+			end
+
+			if humanoid.MoveDirection.Magnitude > 0.05 then
+				stopCurrentEmote()
+			end
+		end)
+end
+
+local function createEmoteViewport(
+	viewport: ViewportFrame,
+	animationId: string
+)
+	clearViewport(viewport)
+
+	local character = player.Character
+
+	if not character then
+		return
+	end
+
+	character.Archivable = true
+
+	local humanoid =
+		character:FindFirstChildOfClass("Humanoid")
+
+	if not humanoid then
+		return
+	end
+
+	local clone = character:Clone()
+
+	if not clone then
+		return
+	end
+
+	clone.Name = "EmoteCharacter"
+
+	for _, object in ipairs(clone:GetDescendants()) do
+		if object:IsA("Script")
+			or object:IsA("LocalScript")
+			or object:IsA("Tool")
+			or object:IsA("Sound")
+		then
+			object:Destroy()
+
+		elseif object:IsA("BasePart") then
+			object.CanCollide = false
+			object.CanTouch = false
+			object.CanQuery = false
+			object.CastShadow = false
+		end
+	end
+
+	local cloneHumanoid =
+		clone:FindFirstChildOfClass("Humanoid")
+
+	local root =
+		clone:FindFirstChild("HumanoidRootPart")
+
+	if not cloneHumanoid or not root then
+		clone:Destroy()
+		return
+	end
+
+	local worldModel =
+		Instance.new("WorldModel")
+
+	worldModel.Name = "WorldModel"
+	worldModel.Parent = viewport
+
+	clone.Parent = worldModel
+
+	local animator =
+		cloneHumanoid:FindFirstChildOfClass("Animator")
+
+	if not animator then
+		animator =
+			Instance.new("Animator")
+
+		animator.Parent = cloneHumanoid
+	end
+
+	clone:PivotTo(
+		CFrame.new(0, 0, 0)
+	)
+
+	local boundingCFrame, boundingSize =
+		clone:GetBoundingBox()
+
+	local center =
+		boundingCFrame.Position
+
+	clone:PivotTo(
+		clone:GetPivot()
+			+ Vector3.new(
+				-center.X,
+				-center.Y + boundingSize.Y / 2,
+				-center.Z
+			)
+	)
+
+	local finalCFrame, finalSize =
+		clone:GetBoundingBox()
+
+	local target =
+		finalCFrame.Position
+
+	local distance =
+		math.max(
+			finalSize.Y * 2,
+			6
+		)
+
+	local camera =
+		Instance.new("Camera")
+
+	camera.Name = "EmoteCamera"
+	camera.FieldOfView = 35
+	camera.Parent = viewport
+
+	viewport.CurrentCamera = camera
+
+	camera.CFrame =
+		CFrame.lookAt(
+			target + Vector3.new(0, 0, -distance),
+			target,
+			Vector3.new(0, 1, 0)
+		)
+
+	local animation =
+		Instance.new("Animation")
+
+	animation.Name = "EmoteAnimation"
+	animation.AnimationId = animationId
+	animation.Parent = clone
+
+	local success, track =
+		pcall(function()
+			return animator:LoadAnimation(animation)
+		end)
+
+	if not success or not track then
+		animation:Destroy()
+		return
+	end
+
+	track.Priority =
+		Enum.AnimationPriority.Action4
+
+	track.Looped = true
+	track:Play(0)
+end
+
+local function updateSlot(
+	slotName: string,
+	emoteName: string
+)
+	if slotName ~= "E1"
+		and slotName ~= "E2"
+		and slotName ~= "E3"
+		and slotName ~= "E4"
+		and slotName ~= "E5"
+		and slotName ~= "E6"
+	then
+		return
+	end
+
+	local slot =
+		emoteWheel:FindFirstChild(slotName)
+
+	if not slot or not slot:IsA("GuiObject") then
+		return
+	end
+
+	local viewport =
+		slot:FindFirstChild("EmoteViewport")
+
+	if not viewport
+		or not viewport:IsA("ViewportFrame")
+	then
+		return
+	end
+
+	local animationId =
+		emoteAnimations[emoteName]
+
+	if not animationId then
+		clearViewport(viewport)
+
+		slot:SetAttribute(
+			"Emote",
+			""
+		)
+
+		return
+	end
+
+	viewport.Active = false
+
+	slot:SetAttribute(
+		"Emote",
+		emoteName
+	)
+
+	createEmoteViewport(
+		viewport,
+		animationId
+	)
+end
+
+local function loadSavedEmotes()
+	if not currentData then
+		return
+	end
+
+	if not currentData.Equipped then
+		return
+	end
+
+	local emoteSlots =
+		currentData.Equipped.EmoteSlots
+
+	if not emoteSlots then
+		return
+	end
+
+	if not characterReady then
+		return
+	end
+
+	for i = 1, 6 do
+		local slotName =
+			"E" .. i
+
+		local emoteName =
+			emoteSlots[slotName]
+
+		if typeof(emoteName) == "string"
+			and emoteName ~= ""
+		then
+			updateSlot(
+				slotName,
+				emoteName
+			)
+		else
+			local slot =
+				emoteWheel:FindFirstChild(slotName)
+
+			if slot and slot:IsA("GuiObject") then
+				local viewport =
+					slot:FindFirstChild(
+						"EmoteViewport"
+					)
+
+				if viewport
+					and viewport:IsA("ViewportFrame")
+				then
+					clearViewport(viewport)
+				end
+
+				slot:SetAttribute(
+					"Emote",
+					""
+				)
+			end
+		end
+	end
+end
+
+local function getEquippedEmote(
+	slotName: string
+): string?
+	if not currentData then
+		return nil
+	end
+
+	if not currentData.Equipped then
+		return nil
+	end
+
+	local emoteSlots =
+		currentData.Equipped.EmoteSlots
+
+	if not emoteSlots then
+		return nil
+	end
+
+	local emoteName =
+		emoteSlots[slotName]
+
+	if typeof(emoteName) ~= "string"
+		or emoteName == ""
+	then
+		return nil
+	end
+
+	return emoteName
+end
+
+local function playEmote(
+	emoteName: string
+)
+	local animationId =
+		emoteAnimations[emoteName]
+
+	if not animationId then
+		return
+	end
+
+	local character =
+		player.Character
+
+	if not character then
+		return
+	end
+
+	local humanoid =
+		character:FindFirstChildOfClass("Humanoid")
+
+	if not humanoid then
+		return
+	end
+
+	local animator =
+		humanoid:FindFirstChildOfClass("Animator")
+
+	if not animator then
+		animator =
+			Instance.new("Animator")
+
+		animator.Parent =
+			humanoid
+	end
+
+	stopCurrentEmote()
+
+	local animation =
+		Instance.new("Animation")
+
+	animation.Name =
+		"ActiveEmote"
+
+	animation.AnimationId =
+		animationId
+
+	local success, track =
+		pcall(function()
+			return animator:LoadAnimation(
+				animation
+			)
+		end)
+
+	if not success or not track then
+		animation:Destroy()
+		return
+	end
+
+	track.Priority =
+		Enum.AnimationPriority.Action4
+
+	track.Looped = true
+	track:Play(0.1)
+
+	currentEmoteTrack =
+		track
+
+	currentEmoteAnimation =
+		animation
+end
+
+local function useWheelSlot(
+	slotName: string
+)
+	local emoteName =
+		getEquippedEmote(slotName)
+
+	if emoteName then
+		playEmote(emoteName)
+	end
+
+	closeWheelEvent:Fire()
+end
+
+for i = 1, 6 do
+	local slot =
+		emoteWheel:WaitForChild(
+			"E" .. i
+		)
+
+	if slot:IsA("GuiButton") then
+		local slotName =
+			"E" .. i
+
+		slot.Activated:Connect(function()
+			useWheelSlot(slotName)
+		end)
+	end
+end
+
+viewportUpdate.Event:Connect(function(
+	slotName,
+	emoteName
+)
+	if typeof(slotName) ~= "string" then
+		return
+	end
+
+	if typeof(emoteName) ~= "string" then
+		return
+	end
+
+	updateSlot(
+		slotName,
+		emoteName
+	)
+
+	if currentData
+		and currentData.Equipped
+		and currentData.Equipped.EmoteSlots
+	then
+		currentData.Equipped.EmoteSlots[slotName] =
+			emoteName
+	end
+end)
+
+dataRemote.OnClientEvent:Connect(function(data)
+	currentData = data
+
+	task.defer(function()
+		loadSavedEmotes()
+	end)
+end)
+
+local function setupCharacter(
+	character: Model
+)
+	stopCurrentEmote()
+	disconnectEmoteMovementConnections()
+
+	characterReady = false
+
+	local humanoid =
+		character:WaitForChild(
+			"Humanoid"
+		) :: Humanoid
+
+	character:WaitForChild(
+		"HumanoidRootPart"
+	)
+
+	currentHumanoid =
+		humanoid
+
+	setupEmoteMovementDetection(
+		humanoid
+	)
+
+	characterReady = true
+
+	task.wait(0.5)
+
+	loadSavedEmotes()
+end
+
+player.CharacterAdded:Connect(function(character)
+	task.spawn(function()
+		setupCharacter(character)
+	end)
+end)
+
+if player.Character then
+	task.spawn(function()
+		setupCharacter(
+			player.Character
+		)
+	end)
+end
+
+task.defer(function()
+	requestDataRemote:FireServer()
+end)
