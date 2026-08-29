@@ -1,0 +1,679 @@
+--!strict
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+
+local InventoryController = require(
+	ReplicatedStorage
+		:WaitForChild("Modules")
+		:WaitForChild("ClientModules")
+		:WaitForChild("InventoryController")
+)
+
+local DataController = require(
+	ReplicatedStorage
+		:WaitForChild("Modules")
+		:WaitForChild("ClientModules")
+		:WaitForChild("DataController")
+)
+
+local Remotes = require(
+	Shared:WaitForChild("Remotes")
+)
+
+local ItemCatalog = require(
+	Shared:WaitForChild("ItemCatalog")
+)
+
+local equipAbilityRemote: RemoteEvent =
+	Remotes.EquipAbility
+
+local player =
+	Players.LocalPlayer
+
+local shopUi =
+	script.Parent
+
+local ABILITY_SLOT_2_GAMEPASS_ID =
+	1953634255
+
+local wholeAbilitiesFrame =
+	shopUi:WaitForChild(
+		"WholeAbilitiesFrame"
+	)
+
+local dataFolder =
+	wholeAbilitiesFrame:WaitForChild(
+		"Data"
+	)
+
+local dashTextFrame =
+	dataFolder:WaitForChild(
+		"DashText"
+	)
+
+local dashFact =
+	dashTextFrame:WaitForChild(
+		"DashFact"
+	) :: TextLabel
+
+local dashUnlockFrame =
+	dataFolder:WaitForChild(
+		"DashUnlockFrame"
+	)
+
+local dashInPanel =
+	dashUnlockFrame:WaitForChild(
+		"DashInPanel"
+	)
+
+local dashUnlockText =
+	dashInPanel:WaitForChild(
+		"DashUnlockText"
+	) :: TextLabel
+
+local dashUnlockIcon =
+	dashInPanel:WaitForChild(
+		"DashUnlockIcon"
+	) :: ImageLabel
+
+local equipButton =
+	dataFolder:WaitForChild(
+		"Equip"
+	) :: ImageButton
+
+local equipText =
+	equipButton:WaitForChild(
+		"EquipText"
+	) :: TextLabel
+
+local buyButton =
+	wholeAbilitiesFrame:WaitForChild(
+		"Buy"
+	) :: ImageButton
+
+local priceLabel =
+	buyButton:WaitForChild(
+		"Price"
+	) :: TextLabel
+
+local equipSlot =
+	wholeAbilitiesFrame:WaitForChild(
+		"EquipSlot"
+	)
+
+local equip1 =
+	equipSlot:WaitForChild(
+		"Equip1"
+	) :: ImageButton
+
+local equip2 =
+	equipSlot:WaitForChild(
+		"Equip2"
+	) :: ImageButton
+
+local equip1Text =
+	equip1:WaitForChild(
+		"EquipText"
+	) :: TextLabel
+
+local equip2Text =
+	equip2:WaitForChild(
+		"EquipText"
+	) :: TextLabel
+
+local ownedAbilities =
+	wholeAbilitiesFrame:WaitForChild(
+		"OwnedAbilities"
+	)
+
+local scrollingFrame =
+	ownedAbilities:WaitForChild(
+		"ScrollingFrame"
+	)
+
+local currentlySelected: string? =
+	nil
+
+local ownsSlot2 =
+	false
+
+local slot2OwnershipKnown =
+	false
+
+local slot2OwnershipChecking =
+	false
+
+type SkillInfo = {
+	Title: string,
+	Description: string,
+	Image: string,
+}
+
+local DEFAULT_ABILITY_IMAGE =
+	"rbxassetid://86889060985384"
+
+local SkillData: {[string]: SkillInfo} = {
+	Dash = {
+		Title = "DASH",
+		Description = "Swiftly move towards your opponent direction",
+		Image = DEFAULT_ABILITY_IMAGE,
+	},
+
+	Heal = {
+		Title = "HEAL",
+		Description = "Gradually restore your health",
+		Image = "rbxassetid://73080282311874",
+	},
+
+	ForceField = {
+		Title = "FORCEFIELD",
+		Description = "Become immune to whips for a short duration",
+		Image = "rbxassetid://118545785299126",
+	},
+
+	Invisibility = {
+		Title = "INVISIBILITY",
+		Description = "Become completely invisible for a short duration",
+		Image = DEFAULT_ABILITY_IMAGE,
+	},
+
+	LifeSteal = {
+		Title = "LIFE STEAL",
+		Description = "Heal based on the damage you deal",
+		Image = "rbxassetid://113711239969534",
+	},
+
+	LassoPull = {
+		Title = "LASSO PULL",
+		Description = "Your next whip pulls the enemy towards you",
+		Image = "rbxassetid://113711239969534",
+	},
+
+	Blitz = {
+		Title = "BLITZ",
+		Description = "Move faster and unleash faster M1 attacks",
+		Image = DEFAULT_ABILITY_IMAGE,
+	},
+
+	Flashstep = {
+		Title = "FLASHSTEP",
+		Description = "Teleport instantly to the location you are looking at",
+		Image = DEFAULT_ABILITY_IMAGE,
+	},
+
+	Prodigy = {
+		Title = "PRODIGY",
+		Description = "Gain increased movement speed and a triple jump",
+		Image = DEFAULT_ABILITY_IMAGE,
+	},
+}
+
+local function getEquippedAbility(): string
+	local data =
+		DataController.get()
+
+	if data
+		and data.Equipped
+		and type(data.Equipped.Ability) == "string"
+	then
+		return data.Equipped.Ability
+	end
+
+	return ""
+end
+
+local function getEquippedAbility2(): string
+	local data =
+		DataController.get()
+
+	if data
+		and data.Equipped
+		and type(data.Equipped.Ability2) == "string"
+	then
+		return data.Equipped.Ability2
+	end
+
+	return ""
+end
+
+local function ownsAbility(
+	abilityId: string
+): boolean
+	local data =
+		DataController.get()
+
+	if not data then
+		return false
+	end
+
+	if not data.Inventory then
+		return false
+	end
+
+	if not data.Inventory.Abilities then
+		return false
+	end
+
+	return table.find(
+		data.Inventory.Abilities,
+		abilityId
+	) ~= nil
+end
+
+local function getAbilityPrice(
+	abilityId: string
+): number
+	local item =
+		ItemCatalog.get(
+			abilityId
+		)
+
+	if not item then
+		return 0
+	end
+
+	return item.Price or 0
+end
+
+local function getEquippedSlot(
+	abilityId: string
+): number?
+	local slot1 =
+		getEquippedAbility()
+
+	local slot2 =
+		getEquippedAbility2()
+
+	if slot1 == abilityId then
+		return 1
+	end
+
+	if slot2 == abilityId then
+		return 2
+	end
+
+	return nil
+end
+
+local function refreshSlot2Ownership(
+	forceCheck: boolean?
+): boolean
+	if slot2OwnershipChecking then
+		return ownsSlot2
+	end
+
+	if slot2OwnershipKnown
+		and not forceCheck
+	then
+		return ownsSlot2
+	end
+
+	slot2OwnershipChecking =
+		true
+
+	local success, result =
+		pcall(function()
+			return MarketplaceService:UserOwnsGamePassAsync(
+				player.UserId,
+				ABILITY_SLOT_2_GAMEPASS_ID
+			)
+		end)
+
+	slot2OwnershipChecking =
+		false
+
+	if success then
+		ownsSlot2 =
+			result == true
+
+		slot2OwnershipKnown =
+			true
+	end
+
+	return ownsSlot2
+end
+
+local function updateEquipSlot()
+	if not currentlySelected then
+		equip1Text.Text =
+			"EQUIP IN ABILITY 1"
+
+		equip2Text.Text =
+			"EQUIP IN ABILITY 2"
+
+		return
+	end
+
+	local equippedSlot =
+		getEquippedSlot(
+			currentlySelected
+		)
+
+	if equippedSlot == 1 then
+		equip1Text.Text =
+			"EQUIPPED IN ABILITY 1"
+	else
+		equip1Text.Text =
+			"EQUIP IN ABILITY 1"
+	end
+
+	if equippedSlot == 2 then
+		equip2Text.Text =
+			"EQUIPPED IN ABILITY 2"
+	elseif refreshSlot2Ownership() then
+		equip2Text.Text =
+			"EQUIP IN ABILITY 2"
+	else
+		equip2Text.Text =
+			"UNLOCK ABILITY 2"
+	end
+end
+
+local function updateButton()
+	if not currentlySelected then
+		equipButton.Visible =
+			false
+
+		buyButton.Visible =
+			false
+
+		equipSlot.Visible =
+			false
+
+		return
+	end
+
+	local owned =
+		ownsAbility(
+			currentlySelected
+		)
+
+	if owned then
+		buyButton.Visible =
+			false
+
+		equipButton.Visible =
+			true
+
+		local equippedSlot =
+			getEquippedSlot(
+				currentlySelected
+			)
+
+		if equippedSlot == 1 then
+			equipText.Text =
+				"EQUIPPED (SLOT 1)"
+		elseif equippedSlot == 2 then
+			equipText.Text =
+				"EQUIPPED (SLOT 2)"
+		else
+			equipText.Text =
+				"EQUIP"
+		end
+
+		updateEquipSlot()
+
+		return
+	end
+
+	equipButton.Visible =
+		false
+
+	equipSlot.Visible =
+		false
+
+	buyButton.Visible =
+		true
+
+	local price =
+		getAbilityPrice(
+			currentlySelected
+		)
+
+	priceLabel.Text =
+		tostring(price)
+end
+
+local function updateSkillPanel(
+	skillName: string
+)
+	local skill =
+		SkillData[skillName]
+
+	if not skill then
+		return
+	end
+
+	currentlySelected =
+		skillName
+
+	dashFact.Text =
+		skill.Description
+
+	dashUnlockText.Text =
+		skill.Title
+
+	dashUnlockIcon.Image =
+		skill.Image
+
+	equipSlot.Visible =
+		false
+
+	updateButton()
+end
+
+local function connectAbility(
+	abilityName: string
+)
+	local abilityFrame =
+		scrollingFrame:FindFirstChild(
+			abilityName
+		)
+
+	if not abilityFrame then
+		warn(
+			"FactPanel: Could not find ability frame:",
+			abilityName
+		)
+
+		return
+	end
+
+	local selectButton =
+		abilityFrame:FindFirstChild(
+			"Select" .. abilityName
+		)
+
+	if not selectButton then
+		warn(
+			"FactPanel: Could not find select button:",
+			"Select" .. abilityName
+		)
+
+		return
+	end
+
+	if not selectButton:IsA(
+		"GuiButton"
+		) then
+		warn(
+			"FactPanel: Select object is not a GuiButton:",
+			abilityName
+		)
+
+		return
+	end
+
+	selectButton.Activated:Connect(
+		function()
+			updateSkillPanel(
+				abilityName
+			)
+		end
+	)
+end
+
+for abilityName in pairs(
+	SkillData
+	) do
+	connectAbility(
+		abilityName
+	)
+end
+
+equipButton.Activated:Connect(
+	function()
+		if not currentlySelected then
+			return
+		end
+
+		if not ownsAbility(
+			currentlySelected
+			) then
+			return
+		end
+
+		updateEquipSlot()
+
+		equipSlot.Visible =
+			true
+	end
+)
+
+equip1.Activated:Connect(
+	function()
+		if not currentlySelected then
+			return
+		end
+
+		if not ownsAbility(
+			currentlySelected
+			) then
+			return
+		end
+
+		equipAbilityRemote:FireServer(
+			currentlySelected,
+			1
+		)
+
+		equipSlot.Visible =
+			false
+	end
+)
+
+equip2.Activated:Connect(
+	function()
+		if not currentlySelected then
+			return
+		end
+
+		if not ownsAbility(
+			currentlySelected
+			) then
+			return
+		end
+
+		if not refreshSlot2Ownership() then
+			MarketplaceService:PromptGamePassPurchase(
+				player,
+				ABILITY_SLOT_2_GAMEPASS_ID
+			)
+
+			return
+		end
+
+		equipAbilityRemote:FireServer(
+			currentlySelected,
+			2
+		)
+
+		equipSlot.Visible =
+			false
+	end
+)
+
+buyButton.Activated:Connect(
+	function()
+		if not currentlySelected then
+			return
+		end
+
+		if ownsAbility(
+			currentlySelected
+			) then
+			return
+		end
+
+		InventoryController.requestBuy(
+			currentlySelected
+		)
+	end
+)
+
+MarketplaceService.PromptGamePassPurchaseFinished:Connect(
+	function(
+		finishedPlayer,
+		passId,
+		purchased
+	)
+		if finishedPlayer ~= player then
+			return
+		end
+
+		if passId ~= ABILITY_SLOT_2_GAMEPASS_ID then
+			return
+		end
+
+		if purchased then
+			ownsSlot2 =
+				true
+
+			slot2OwnershipKnown =
+				true
+		else
+			ownsSlot2 =
+				false
+
+			slot2OwnershipKnown =
+				false
+		end
+
+		updateButton()
+		updateEquipSlot()
+	end
+)
+
+DataController.onChanged(
+	function()
+		updateButton()
+		updateEquipSlot()
+	end
+)
+
+equipButton.Visible =
+	false
+
+buyButton.Visible =
+	false
+
+equipSlot.Visible =
+	false
+
+equip1Text.Text =
+	"EQUIP IN ABILITY 1"
+
+equip2Text.Text =
+	"EQUIP IN ABILITY 2"
+
+refreshSlot2Ownership(
+	true
+)
+
+updateSkillPanel(
+	"Dash"
+)
