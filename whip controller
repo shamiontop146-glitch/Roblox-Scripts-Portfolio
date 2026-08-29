@@ -1,0 +1,1484 @@
+--!nonstrict
+
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local WhipEvent = ReplicatedStorage:WaitForChild("WhipEvent")
+local ChainsVFXEvent = ReplicatedStorage:WaitForChild("ChainsVFXEvent")
+local ChainsVFXFolder = ReplicatedStorage:WaitForChild("chains vfx")
+local ItemCatalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemCatalog"))
+local DataController = require(script.Parent:WaitForChild("DataController"))
+local localPlayer = Players.LocalPlayer
+
+local activeWhips = {}
+
+local STRIKE_DURATION = 0.35
+local SEGMENT_COUNT = 64
+local NODE_COUNT = SEGMENT_COUNT + 1
+local LASSO_STEM_FRACTION = 0.2
+local LASSO_RADIUS = 3.35
+local LASSO_SPIN_SPEED = -9.5
+local TAU = math.pi * 2
+
+local LOCAL_INVISIBILITY_WHIP_TRANSPARENCY = 0.55
+local REMOTE_INVISIBILITY_WHIP_TRANSPARENCY = 1
+
+local LASSO_ANIM_ID = "rbxassetid://100052788464724"
+local WALK_LASSO_ANIM_ID = "rbxassetid://115509844307010"
+local STRIKE_ANIM_ID = "rbxassetid://133581478172410"
+local MATCH_JUMP_ANIM_ID = "rbxassetid://134309439530669"
+
+local DEFAULT_LASSO_ID = "DefaultLasso"
+
+local function smoothstep(t)
+	t = math.clamp(t, 0, 1)
+	return t * t * (3 - 2 * t)
+end
+
+local function getBaseCFrame(player, char)
+	local tool = char:FindFirstChild("LassoWhip")
+	local handle = tool and tool:FindFirstChild("Handle")
+
+	if handle then
+		return handle.CFrame
+	end
+
+	local rightHand = char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm")
+
+	if rightHand then
+		return rightHand.CFrame
+	end
+
+	return char.PrimaryPart and char.PrimaryPart.CFrame or CFrame.new()
+end
+
+local function getLocalEquippedLasso(): string
+	local data = DataController.get()
+
+	if data
+		and data.Equipped
+		and type(data.Equipped.Lasso) == "string"
+		and data.Equipped.Lasso ~= ""
+	then
+		return data.Equipped.Lasso
+	end
+
+	return DEFAULT_LASSO_ID
+end
+
+local function updateWhipTransparency(player, visuals)
+	if not visuals then
+		return
+	end
+
+	local character = player.Character
+
+	if not character then
+		return
+	end
+
+	local isInvisible = character:GetAttribute("InvisibilityActive") == true
+
+	local transparency = 0
+
+	if player == localPlayer then
+		if getLocalEquippedLasso() ~= DEFAULT_LASSO_ID then
+			transparency = 1
+		elseif isInvisible then
+			transparency = LOCAL_INVISIBILITY_WHIP_TRANSPARENCY
+		end
+	else
+		if isInvisible then
+			transparency = REMOTE_INVISIBILITY_WHIP_TRANSPARENCY
+		end
+	end
+
+	for _, part in ipairs(visuals.segments) do
+		part.Transparency = transparency
+	end
+
+	visuals.tipPart.Transparency = transparency
+end
+
+local function createWhipVisuals(player)
+	local folder = Instance.new("Folder")
+	folder.Name = "Whip_Visuals_" .. player.Name
+	folder.Parent = workspace.CurrentCamera
+
+	local segments = {}
+
+	for i = 1, SEGMENT_COUNT do
+		local part = Instance.new("Part")
+		part.Name = "Segment_" .. i
+		part.Shape = Enum.PartType.Cylinder
+		part.Color = Color3.fromRGB(215, 185, 145)
+		part.Material = Enum.Material.Fabric
+		part.CastShadow = false
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CanTouch = false
+		part.Anchored = true
+		part.Parent = folder
+
+		table.insert(segments, part)
+	end
+
+	local tipPart = Instance.new("Part")
+	tipPart.Name = "Tip"
+	tipPart.Shape = Enum.PartType.Ball
+	tipPart.Color = Color3.fromRGB(230, 60, 60)
+	tipPart.Material = Enum.Material.SmoothPlastic
+	tipPart.CastShadow = false
+	tipPart.CanCollide = false
+	tipPart.CanQuery = false
+	tipPart.CanTouch = false
+	tipPart.Anchored = true
+	tipPart.Size = Vector3.new(0.15, 0.15, 0.15)
+	tipPart.Parent = folder
+
+	local sound = Instance.new("Sound")
+	sound.Name = "CrackSound"
+	sound.SoundId = "rbxassetid://9113612424"
+	sound.Volume = 1.0
+	sound.RollOffMaxDistance = 150
+	sound.RollOffMinDistance = 10
+	sound.Parent = tipPart
+
+	local sparks = Instance.new("ParticleEmitter")
+	sparks.Name = "Sparks"
+	sparks.Color = ColorSequence.new(Color3.fromRGB(255, 230, 140))
+	sparks.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.6),
+		NumberSequenceKeypoint.new(1, 0)
+	})
+	sparks.Speed = NumberRange.new(15, 28)
+	sparks.SpreadAngle = Vector2.new(180, 180)
+	sparks.Lifetime = NumberRange.new(0.15, 0.35)
+	sparks.Rate = 0
+	sparks.Enabled = false
+	sparks.Parent = tipPart
+
+	local smoke = Instance.new("ParticleEmitter")
+	smoke.Name = "Smoke"
+	smoke.Color = ColorSequence.new(Color3.fromRGB(230, 230, 230))
+	smoke.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.4),
+		NumberSequenceKeypoint.new(1, 2.0)
+	})
+	smoke.Speed = NumberRange.new(2, 6)
+	smoke.SpreadAngle = Vector2.new(180, 180)
+	smoke.Lifetime = NumberRange.new(0.4, 0.7)
+	smoke.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.4),
+		NumberSequenceKeypoint.new(1, 1)
+	})
+	smoke.Rate = 0
+	smoke.Enabled = false
+	smoke.Parent = tipPart
+
+	local flash = Instance.new("PointLight")
+	flash.Name = "Flash"
+	flash.Color = Color3.fromRGB(255, 245, 200)
+	flash.Brightness = 0
+	flash.Range = 12
+	flash.Enabled = false
+	flash.Parent = tipPart
+
+	local visuals = {
+		folder = folder,
+		segments = segments,
+		tipPart = tipPart,
+		sound = sound,
+		sparks = sparks,
+		smoke = smoke,
+		flash = flash
+	}
+
+	updateWhipTransparency(player, visuals)
+
+	return visuals
+end
+
+local function updateWhipVisuals(visuals, nodePositions, dt)
+	for i = 1, SEGMENT_COUNT do
+		local p1 = nodePositions[i]
+		local p2 = nodePositions[i + 1]
+		local part = visuals.segments[i]
+
+		if p1 and p2 and part then
+			local diff = p2 - p1
+			local dist = diff.Magnitude
+			local taper = (i - 1) / SEGMENT_COUNT
+			local thickness = math.max(
+				0.2 * (1 - taper) + 0.035 * taper,
+				0.035
+			)
+
+			part.Size = Vector3.new(dist, thickness, thickness)
+
+			if dist > 0.001 then
+				part.CFrame =
+					CFrame.lookAt(
+						p1 + diff * 0.5,
+						p2
+					) *
+					CFrame.Angles(
+						0,
+						math.pi / 2,
+						0
+					)
+			end
+		end
+	end
+
+	local tipPos = nodePositions[NODE_COUNT]
+
+	if tipPos then
+		visuals.tipPart.CFrame = CFrame.new(tipPos)
+	end
+
+	if visuals.flash.Enabled then
+		visuals.flash.Brightness =
+			visuals.flash.Brightness - dt * 35
+
+		if visuals.flash.Brightness <= 0 then
+			visuals.flash.Enabled = false
+		end
+	end
+end
+
+local function getLassoPosition(x, elapsed, handPos, headPos)
+	local circleCenter =
+		headPos + Vector3.new(0, 1.35, 0)
+
+	local spinAngle =
+		elapsed * LASSO_SPIN_SPEED
+
+	local entryAngle =
+		spinAngle - 0.55
+
+	if x < LASSO_STEM_FRACTION then
+		local t =
+			smoothstep(
+				x / LASSO_STEM_FRACTION
+			)
+
+		local entryPos =
+			circleCenter +
+			Vector3.new(
+				math.cos(entryAngle) *
+				(LASSO_RADIUS * 0.92),
+				-0.05,
+				math.sin(entryAngle) *
+				(LASSO_RADIUS * 0.92)
+			)
+
+		local sag =
+			-math.sin(t * math.pi) * 0.28
+
+		return handPos:Lerp(entryPos, t) +
+			Vector3.new(0, sag, 0)
+	end
+
+	local t =
+		(x - LASSO_STEM_FRACTION) /
+		(1 - LASSO_STEM_FRACTION)
+
+	local nodeAngle =
+		entryAngle +
+		t * TAU * 2.08
+
+	local radius =
+		LASSO_RADIUS -
+		t * 0.62 +
+		math.sin(t * math.pi) * 0.12
+
+	local spiralLift =
+		(t - 0.5) * 0.48
+
+	local verticalBob =
+		spiralLift +
+		math.sin(
+			spinAngle * 0.35 +
+			t * TAU * 4
+		) * 0.07
+
+	return circleCenter +
+		Vector3.new(
+			math.cos(nodeAngle) * radius,
+			verticalBob,
+			math.sin(nodeAngle) * radius
+		)
+end
+
+local function addWhip(player)
+	if activeWhips[player] then
+		return
+	end
+
+	local char = player.Character
+
+	if not char then
+		return
+	end
+
+	local visuals =
+		createWhipVisuals(player)
+
+	activeWhips[player] = {
+		player = player,
+		character = char,
+		visuals = visuals,
+		state = "Idle",
+		elapsed = 0,
+		strikeProgress = 0,
+		strikeTarget = Vector3.new(),
+		strikeStartPositions = {},
+		cracked = false,
+		hitDebounce = {},
+		prevNodePositions = {}
+	}
+
+	if player == localPlayer then
+		local humanoid =
+			char:FindFirstChildOfClass("Humanoid")
+
+		if humanoid then
+			local lassoAnim =
+				Instance.new("Animation")
+
+			lassoAnim.AnimationId =
+				LASSO_ANIM_ID
+
+			local animator =
+				humanoid:FindFirstChildOfClass("Animator")
+
+			if not animator then
+				animator =
+					Instance.new("Animator")
+
+				animator.Parent = humanoid
+			end
+
+			local lassoTrack =
+				animator:LoadAnimation(
+					lassoAnim
+				)
+
+			lassoTrack.Looped = true
+			lassoTrack.Priority =
+				Enum.AnimationPriority.Action4
+
+			lassoTrack:Play(
+				0.15,
+				1,
+				1
+			)
+
+			activeWhips[player].lassoTrack =
+				lassoTrack
+
+			local walkLassoAnim =
+				Instance.new("Animation")
+
+			walkLassoAnim.AnimationId =
+				WALK_LASSO_ANIM_ID
+
+			local walkLassoTrack =
+				animator:LoadAnimation(
+					walkLassoAnim
+				)
+
+			walkLassoTrack.Looped = true
+			walkLassoTrack.Priority =
+				Enum.AnimationPriority.Action4
+
+			activeWhips[player].walkLassoTrack =
+				walkLassoTrack
+
+			local strikeAnim =
+				Instance.new("Animation")
+
+			strikeAnim.AnimationId =
+				STRIKE_ANIM_ID
+
+			local strikeTrack =
+				animator:LoadAnimation(
+					strikeAnim
+				)
+
+			strikeTrack.Looped = false
+			strikeTrack.Priority =
+				Enum.AnimationPriority.Action4
+
+			activeWhips[player].strikeTrack =
+				strikeTrack
+
+			local jumpAnim =
+				Instance.new("Animation")
+
+			jumpAnim.AnimationId =
+				MATCH_JUMP_ANIM_ID
+
+			local jumpTrack =
+				animator:LoadAnimation(
+					jumpAnim
+				)
+
+			jumpTrack.Looped = true
+			jumpTrack.Priority =
+				Enum.AnimationPriority.Action4
+
+			activeWhips[player].jumpTrack =
+				jumpTrack
+		end
+	end
+end
+
+local function removeWhip(player)
+	local whip = activeWhips[player]
+
+	if whip then
+		if whip.visuals
+			and whip.visuals.folder then
+			whip.visuals.folder:Destroy()
+		end
+
+		if whip.lassoTrack then
+			whip.lassoTrack:Stop()
+		end
+
+		if whip.walkLassoTrack then
+			whip.walkLassoTrack:Stop()
+		end
+
+		if whip.strikeTrack then
+			whip.strikeTrack:Stop()
+		end
+
+		if whip.jumpTrack then
+			whip.jumpTrack:Stop()
+		end
+
+		activeWhips[player] = nil
+	end
+end
+
+local function triggerStrike(player, targetPos)
+	local whip = activeWhips[player]
+
+	if not whip then
+		addWhip(player)
+		whip = activeWhips[player]
+	end
+
+	if whip then
+		local startNodes = {}
+
+		local baseCFrame =
+			getBaseCFrame(
+				player,
+				whip.character
+			)
+
+		local handPos =
+			baseCFrame.Position
+
+		local headPos =
+			whip.character.PrimaryPart
+			and whip.character.PrimaryPart.Position +
+			Vector3.new(0, 3, 0)
+			or handPos +
+			Vector3.new(0, 3, 0)
+
+		for i = 1, NODE_COUNT do
+			local x =
+				(i - 1) / SEGMENT_COUNT
+
+			startNodes[i] =
+				getLassoPosition(
+					x,
+					whip.elapsed,
+					handPos,
+					headPos
+				)
+		end
+
+		whip.state = "Strike"
+		whip.strikeProgress = 0
+		whip.strikeTarget = targetPos
+		whip.strikeStartPositions =
+			startNodes
+		whip.cracked = false
+		whip.hitDebounce = {}
+
+		if player == localPlayer then
+			if whip.lassoTrack
+				and whip.lassoTrack.IsPlaying then
+				whip.lassoTrack:Stop(0.05)
+			end
+
+			if whip.walkLassoTrack
+				and whip.walkLassoTrack.IsPlaying then
+				whip.walkLassoTrack:Stop(0.05)
+			end
+
+			if whip.jumpTrack
+				and whip.jumpTrack.IsPlaying then
+				whip.jumpTrack:Stop(0.05)
+			end
+
+			if whip.strikeTrack then
+				whip.strikeTrack:Play(0.1)
+			end
+
+			local rootPart =
+				whip.character:FindFirstChild(
+					"HumanoidRootPart"
+				)
+
+			local humanoid =
+				whip.character:FindFirstChildOfClass(
+					"Humanoid"
+				)
+
+			if rootPart and humanoid then
+				local lookDir =
+					targetPos -
+					rootPart.Position
+
+				lookDir =
+					Vector3.new(
+						lookDir.X,
+						0,
+						lookDir.Z
+					)
+
+				if lookDir.Magnitude > 0.01 then
+					lookDir =
+						lookDir.Unit
+
+					local currentPos =
+						rootPart.Position
+
+					rootPart.CFrame =
+						CFrame.new(
+							currentPos,
+							currentPos + lookDir
+						)
+
+					humanoid.AutoRotate = false
+				end
+			end
+		end
+	end
+end
+
+local function updateLassoAnimation(whip)
+	if whip.player ~= localPlayer then
+		return
+	end
+
+	if not whip.lassoTrack
+		or not whip.walkLassoTrack then
+		return
+	end
+
+	local humanoid =
+		whip.character
+		and whip.character:FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	if not humanoid then
+		return
+	end
+
+	local state =
+		humanoid:GetState()
+
+	if state == Enum.HumanoidStateType.Jumping
+		or state == Enum.HumanoidStateType.Freefall then
+
+		if whip.jumpTrack
+			and not whip.jumpTrack.IsPlaying then
+			whip.jumpTrack:Play(0.1)
+		end
+
+		if whip.lassoTrack.IsPlaying then
+			whip.lassoTrack:Stop(0.1)
+		end
+
+		if whip.walkLassoTrack.IsPlaying then
+			whip.walkLassoTrack:Stop(0.1)
+		end
+
+		return
+	end
+
+	if whip.jumpTrack
+		and whip.jumpTrack.IsPlaying then
+		whip.jumpTrack:Stop(0.1)
+	end
+
+	if humanoid.MoveDirection.Magnitude > 0.1 then
+		if not whip.walkLassoTrack.IsPlaying then
+			whip.walkLassoTrack:Play(
+				0.2,
+				1,
+				1
+			)
+		end
+
+		if whip.lassoTrack.IsPlaying then
+			whip.lassoTrack:Stop(0.2)
+		end
+	else
+		if not whip.lassoTrack.IsPlaying then
+			whip.lassoTrack:Play(
+				0.2,
+				1,
+				1
+			)
+		end
+
+		if whip.walkLassoTrack.IsPlaying then
+			whip.walkLassoTrack:Stop(0.2)
+		end
+	end
+end
+
+local WhipController = {}
+
+function WhipController.bindTool(tool)
+	local equipped = false
+	local lastStrikeTime = 0
+	local camera = workspace.CurrentCamera
+	local lastTouchPos = nil
+
+	tool.Equipped:Connect(function()
+		equipped = true
+		WhipEvent:FireServer("Equip")
+	end)
+
+	tool.Unequipped:Connect(function()
+		equipped = false
+
+		if tool.Parent == nil then
+			return
+		end
+
+		if localPlayer:GetAttribute("InMatch") then
+			local character = localPlayer.Character
+
+			if character then
+				local humanoid =
+					character:FindFirstChildOfClass(
+						"Humanoid"
+					)
+
+				if humanoid then
+					humanoid:EquipTool(tool)
+				end
+			end
+
+			return
+		end
+
+		WhipEvent:FireServer("Unequip")
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType ==
+			Enum.UserInputType.Touch then
+
+			lastTouchPos = input.Position
+		end
+	end)
+
+	tool.Activated:Connect(function()
+		if not equipped then
+			return
+		end
+
+		local now = tick()
+		local data = DataController.get()
+
+		local whipStats =
+			ItemCatalog.getWhipStats(
+				data and data.Equipped.Lasso
+			)
+
+		if not whipStats then
+			return
+		end
+
+		local cooldown =
+			whipStats.Cooldown
+
+		local character =
+			localPlayer.Character
+
+		if not character then
+			return
+		end
+
+		if character:GetAttribute("BlitzActive") == true then
+			cooldown *= 0.85
+		end
+
+		if now - lastStrikeTime < cooldown then
+			return
+		end
+
+		lastStrikeTime = now
+
+		local root =
+			character:FindFirstChild(
+				"HumanoidRootPart"
+			)
+
+		if not root then
+			return
+		end
+
+		local mousePos
+
+		if UserInputService.TouchEnabled
+			and not UserInputService.MouseEnabled then
+
+			mousePos =
+				lastTouchPos or
+				UserInputService:GetMouseLocation()
+		else
+			mousePos =
+				UserInputService:GetMouseLocation()
+		end
+
+		local unitRay =
+			camera:ViewportPointToRay(
+				mousePos.X,
+				mousePos.Y
+			)
+
+		local raycastParams =
+			RaycastParams.new()
+
+		raycastParams.FilterDescendantsInstances =
+			{character}
+
+		raycastParams.FilterType =
+			Enum.RaycastFilterType.Exclude
+
+		local rayResult =
+			workspace:Raycast(
+				unitRay.Origin,
+				unitRay.Direction * 500,
+				raycastParams
+			)
+
+		local targetPos
+
+		if rayResult then
+			targetPos =
+				rayResult.Position
+		else
+			targetPos =
+				unitRay.Origin +
+				unitRay.Direction * 100
+		end
+
+		local handPos =
+			root.Position
+
+		local diff =
+			targetPos -
+			handPos
+
+		local MAX_RANGE = 30
+
+		if diff.Magnitude > MAX_RANGE then
+			targetPos =
+				handPos +
+				diff.Unit * MAX_RANGE
+		end
+
+		local wallParams =
+			RaycastParams.new()
+
+		wallParams.FilterDescendantsInstances =
+			{character}
+
+		wallParams.FilterType =
+			Enum.RaycastFilterType.Exclude
+
+		local wallResult =
+			workspace:Raycast(
+				handPos,
+				targetPos - handPos,
+				wallParams
+			)
+
+		if wallResult then
+			local wallDist =
+				(wallResult.Position - handPos).Magnitude
+
+			local targetDist =
+				(targetPos - handPos).Magnitude
+
+			if wallDist < targetDist then
+				targetPos =
+					wallResult.Position
+			end
+		end
+
+		triggerStrike(
+			localPlayer,
+			targetPos
+		)
+
+		WhipEvent:FireServer(
+			"Strike",
+			targetPos
+		)
+	end)
+end
+
+function WhipController.start()
+	WhipEvent.OnClientEvent:Connect(function(action, player, ...)
+		local args = {...}
+
+		if action == "Equip" then
+			addWhip(player)
+
+		elseif action == "Unequip" then
+			removeWhip(player)
+
+		elseif action == "Strike" then
+			if player ~= localPlayer then
+				triggerStrike(
+					player,
+					args[1]
+				)
+			end
+		end
+	end)
+end
+
+task.spawn(function()
+	while true do
+		task.wait(0.5)
+
+		for _, player in ipairs(Players:GetPlayers()) do
+			local char = player.Character
+			local tool =
+				char and char:FindFirstChild("LassoWhip")
+
+			if tool then
+				if not activeWhips[player] then
+					addWhip(player)
+				end
+			else
+				if activeWhips[player] then
+					removeWhip(player)
+				end
+			end
+		end
+	end
+end)
+
+RunService.RenderStepped:Connect(function(dt)
+	dt = math.min(dt, 0.05)
+
+	for player, whip in pairs(activeWhips) do
+		local char = whip.character
+
+		if not char
+			or not char.Parent
+			or not char:FindFirstChild(
+				"HumanoidRootPart"
+			) then
+
+			removeWhip(player)
+			continue
+		end
+
+		updateWhipTransparency(
+			player,
+			whip.visuals
+		)
+
+		local baseCFrame =
+			getBaseCFrame(
+				player,
+				char
+			)
+
+		local handPos =
+			baseCFrame.Position
+
+		local headPos =
+			char.PrimaryPart
+			and char.PrimaryPart.Position +
+			Vector3.new(0, 3, 0)
+			or handPos +
+			Vector3.new(0, 3, 0)
+
+		local nodePositions = {}
+
+		if whip.state == "Idle" then
+			updateLassoAnimation(whip)
+
+			whip.elapsed =
+				whip.elapsed + dt
+
+			for i = 1, NODE_COUNT do
+				local x =
+					(i - 1) / SEGMENT_COUNT
+
+				nodePositions[i] =
+					getLassoPosition(
+						x,
+						whip.elapsed,
+						handPos,
+						headPos
+					)
+			end
+
+		elseif whip.state == "Strike" then
+			whip.elapsed =
+				whip.elapsed + dt
+
+			whip.strikeProgress =
+				whip.strikeProgress +
+				dt / STRIKE_DURATION
+
+			local s =
+				whip.strikeProgress
+
+			if s >= 1 then
+				whip.state = "Idle"
+				whip.strikeProgress = 0
+				whip.prevNodePositions = {}
+
+				if player == localPlayer then
+					if whip.strikeTrack
+						and whip.strikeTrack.IsPlaying then
+
+						whip.strikeTrack:Stop(0.2)
+					end
+
+					updateLassoAnimation(whip)
+
+					local humanoid =
+						whip.character
+						and whip.character:FindFirstChildOfClass(
+							"Humanoid"
+						)
+
+					if humanoid then
+						humanoid.AutoRotate = true
+					end
+				end
+
+				for i = 1, NODE_COUNT do
+					local x =
+						(i - 1) / SEGMENT_COUNT
+
+					nodePositions[i] =
+						getLassoPosition(
+							x,
+							whip.elapsed,
+							handPos,
+							headPos
+						)
+				end
+			else
+				local targetPos =
+					whip.strikeTarget
+
+				local direction =
+					targetPos - handPos
+
+				local dir
+
+				if direction.Magnitude > 0.001 then
+					dir = direction.Unit
+				else
+					dir =
+						Vector3.new(
+							0,
+							0,
+							-1
+						)
+				end
+
+				local dist =
+					direction.Magnitude
+
+				local function getStrikePosition(
+					x,
+					currentProgress
+				)
+					if currentProgress <= 0.7 then
+						local progress =
+							currentProgress / 0.7
+
+						local extProgress =
+							math.sin(
+								progress *
+								math.pi /
+								2
+							)
+
+						local linePos =
+							handPos +
+							dir *
+							(dist * x * extProgress)
+
+						local waveCenter =
+							progress
+
+						local waveWidth = 0.35
+
+						local distFromWave =
+							math.abs(
+								x - waveCenter
+							)
+
+						local waveOffset =
+							Vector3.new(
+								0,
+								0,
+								0
+							)
+
+						if distFromWave < waveWidth then
+							local intensity =
+								math.cos(
+									(
+										distFromWave /
+										waveWidth
+									) *
+									math.pi /
+									2
+								)
+
+							local perp =
+								Vector3.new(
+									-dir.Z,
+									0,
+									dir.X
+								)
+
+							if perp.Magnitude > 0.001 then
+								perp =
+									perp.Unit
+							else
+								perp =
+									Vector3.new(
+										0,
+										0,
+										1
+									)
+							end
+
+							local loopVec =
+								(
+									Vector3.new(
+										0,
+										1,
+										0
+									) * 3 +
+									perp * 1.5
+								).Unit
+
+							waveOffset =
+								loopVec *
+								(
+									intensity *
+									4.5 *
+									(1 - x) *
+									extProgress
+								)
+						end
+
+						return linePos +
+							waveOffset
+					else
+						local progress =
+							(
+								currentProgress -
+								0.7
+							) / 0.3
+
+						local fullyExtendedPos =
+							getStrikePosition(
+								x,
+								0.7
+							)
+
+						local idlePos =
+							getLassoPosition(
+								x,
+								whip.elapsed,
+								handPos,
+								headPos
+							)
+
+						local t_retract =
+							progress * progress
+
+						return fullyExtendedPos:Lerp(
+							idlePos,
+							t_retract
+						)
+					end
+				end
+
+				for i = 1, NODE_COUNT do
+					local x =
+						(i - 1) / SEGMENT_COUNT
+
+					local s_start =
+						x * 0.3
+
+					local transitionProgress = 0
+
+					if s >= s_start then
+						transitionProgress =
+							(s - s_start) /
+							(0.7 - s_start)
+
+						transitionProgress =
+							math.clamp(
+								transitionProgress,
+								0,
+								1
+							)
+					end
+
+					local lassoStartPos =
+						whip.strikeStartPositions[i]
+						or handPos
+
+					local strikePos =
+						getStrikePosition(
+							x,
+							s
+						)
+
+					nodePositions[i] =
+						lassoStartPos:Lerp(
+							strikePos,
+							transitionProgress
+						)
+				end
+
+				if s >= 0.7
+					and not whip.cracked then
+
+					whip.cracked = true
+
+					whip.visuals.sound:Play()
+					whip.visuals.sparks:Emit(25)
+					whip.visuals.smoke:Emit(12)
+
+					whip.visuals.flash.Brightness = 6
+					whip.visuals.flash.Enabled = true
+				end
+
+				if s >= 0.20
+					and s <= 1.0
+					and player == localPlayer then
+
+					local overlapParams =
+						OverlapParams.new()
+
+					overlapParams.FilterDescendantsInstances =
+						{char}
+
+					overlapParams.FilterType =
+						Enum.RaycastFilterType.Exclude
+
+					local function getNodeRadius(
+						nodeIndex
+					)
+						local fraction =
+							(nodeIndex - 1) /
+							(NODE_COUNT - 1)
+
+						return 1.5 +
+							fraction * 1.7
+					end
+
+					local function resolveCharacter(
+						part
+					)
+						local model =
+							part.Parent
+
+						if not model then
+							return nil, nil
+						end
+
+						local hum =
+							model:FindFirstChild(
+								"Humanoid"
+							)
+
+						if not hum
+							and model.Parent then
+
+							model = model.Parent
+
+							hum =
+								model:FindFirstChild(
+									"Humanoid"
+								)
+						end
+
+						return model, hum
+					end
+
+					local function tryRegisterHit(
+						hitChar,
+						nearestNodePos
+					)
+						if whip.hitDebounce[hitChar] then
+							return
+						end
+
+						local targetRoot =
+							hitChar:FindFirstChild(
+								"HumanoidRootPart"
+							)
+
+						if not targetRoot then
+							return
+						end
+
+						local wallParams =
+							RaycastParams.new()
+
+						wallParams.FilterDescendantsInstances =
+							{
+								char,
+								hitChar
+							}
+
+						wallParams.FilterType =
+							Enum.RaycastFilterType.Exclude
+
+						if not nearestNodePos then
+							return
+						end
+
+						local toTarget =
+							targetRoot.Position -
+							nearestNodePos
+
+						if toTarget.Magnitude < 0.01 then
+							return
+						end
+
+						local wallResult =
+							workspace:Raycast(
+								nearestNodePos,
+								toTarget,
+								wallParams
+							)
+
+						if not wallResult then
+							whip.hitDebounce[hitChar] =
+								true
+
+							WhipEvent:FireServer(
+								"Hit",
+								hitChar
+							)
+						end
+					end
+
+					local FIRST_HIT_NODE =
+						math.floor(
+							NODE_COUNT * 0.40
+						)
+
+					for nodeIndex =
+						FIRST_HIT_NODE,
+						NODE_COUNT do
+
+						local nodePos =
+							nodePositions[nodeIndex]
+
+						if not nodePos then
+							continue
+						end
+
+						local radius =
+							getNodeRadius(
+								nodeIndex
+							)
+
+						local hitParts =
+							workspace:GetPartBoundsInRadius(
+								nodePos,
+								radius,
+								overlapParams
+							)
+
+						for _, part in ipairs(
+							hitParts
+							) do
+							local hitChar,
+							humanoid =
+								resolveCharacter(
+									part
+								)
+
+							if humanoid
+								and hitChar ~= char then
+
+								tryRegisterHit(
+									hitChar,
+									nodePos
+								)
+							end
+						end
+
+						local prevPos =
+							whip.prevNodePositions
+							and whip.prevNodePositions[
+						nodeIndex
+						]
+
+						if prevPos then
+							local sweepDir =
+								nodePos - prevPos
+
+							local sweepLen =
+								sweepDir.Magnitude
+
+							if sweepLen > 0.05 then
+								local sweepParams =
+									RaycastParams.new()
+
+								sweepParams.FilterDescendantsInstances =
+									{char}
+
+								sweepParams.FilterType =
+									Enum.RaycastFilterType.Exclude
+
+								local sweepResult =
+									workspace:Raycast(
+										prevPos,
+										sweepDir,
+										sweepParams
+									)
+
+								if sweepResult
+									and sweepResult.Instance then
+
+									local hitChar,
+									humanoid =
+										resolveCharacter(
+											sweepResult.Instance
+										)
+
+									if humanoid
+										and hitChar ~= char then
+
+										tryRegisterHit(
+											hitChar,
+											nodePos
+										)
+									end
+								end
+							end
+						end
+					end
+
+					whip.prevNodePositions =
+						table.clone(
+							nodePositions
+						)
+				end
+			end
+		end
+
+		updateWhipVisuals(
+			whip.visuals,
+			nodePositions,
+			dt
+		)
+	end
+end)
+
+Players.PlayerRemoving:Connect(removeWhip)
+
+ChainsVFXEvent.OnClientEvent:Connect(function()
+	local char = localPlayer.Character
+
+	if not char then
+		return
+	end
+
+	local torso =
+		char:FindFirstChild("HumanoidRootPart")
+		or char:FindFirstChild("Torso")
+		or char:FindFirstChild("UpperTorso")
+
+	if not torso then
+		return
+	end
+
+	local clone =
+		ChainsVFXFolder:Clone()
+
+	clone.Parent = torso
+
+	for _, part in ipairs(
+		clone:GetDescendants()
+		) do
+		if part:IsA("BasePart") then
+			part.Anchored = false
+			part.CanCollide = false
+			part.CastShadow = false
+			part.CFrame = torso.CFrame
+
+			local weld =
+				Instance.new("WeldConstraint")
+
+			weld.Part0 = torso
+			weld.Part1 = part
+			weld.Parent = part
+		end
+	end
+
+	for _, emitter in ipairs(
+		clone:GetDescendants()
+		) do
+		if emitter:IsA("ParticleEmitter") then
+			emitter.Enabled = true
+		end
+	end
+
+	task.delay(2, function()
+		if clone and clone.Parent then
+			for _, emitter in ipairs(
+				clone:GetDescendants()
+				) do
+				if emitter:IsA("ParticleEmitter") then
+					emitter.Enabled = false
+				end
+			end
+
+			clone:Destroy()
+		end
+	end)
+end)
+
+return WhipController
