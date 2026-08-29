@@ -1,0 +1,354 @@
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local shopUi = script.Parent
+
+local wholeAbilitiesFrame =
+	shopUi:WaitForChild("WholeAbilitiesFrame")
+
+local wholeEmotesFrame =
+	shopUi:WaitForChild("WholeEmotesFrame")
+
+local wholeWhipsFrame =
+	shopUi:WaitForChild("WholeWhipsFrame")
+
+local abilitiesButton =
+	shopUi:WaitForChild("Abilities")
+
+local emotesButton =
+	shopUi:WaitForChild("Emotes")
+
+local whipsButton =
+	shopUi:WaitForChild("Whips")
+
+local data =
+	wholeEmotesFrame:WaitForChild("Data")
+
+local emoteUnlockFrame =
+	data:WaitForChild("EmoteUnlockFrame")
+
+local unlockViewport =
+	emoteUnlockFrame:WaitForChild("ViewportFrame")
+
+local ownedEmotes =
+	wholeEmotesFrame:WaitForChild("OwnedEmotes")
+
+local scrollingFrame =
+	ownedEmotes:WaitForChild("ScrollingFrame")
+
+local takeL =
+	scrollingFrame:WaitForChild("TakeL")
+
+local selectL =
+	takeL:WaitForChild("SelectL")
+
+local showcaseViewport =
+	selectL:WaitForChild("EmoteShowcase")
+
+local TAKE_THE_L_ANIMATION_ID =
+	"rbxassetid://76143359991994"
+
+local unlockTrack: AnimationTrack? = nil
+local showcaseTrack: AnimationTrack? = nil
+
+local function clearViewport(
+	viewport: ViewportFrame
+)
+	viewport.CurrentCamera = nil
+
+	for _, child in ipairs(
+		viewport:GetChildren()
+		) do
+		child:Destroy()
+	end
+end
+
+local function createViewport(
+	viewport: ViewportFrame
+): AnimationTrack?
+	clearViewport(viewport)
+
+	local character =
+		player.Character
+
+	if not character then
+		character =
+			player.CharacterAdded:Wait()
+	end
+
+	character.Archivable = true
+
+	local worldModel =
+		Instance.new("WorldModel")
+
+	worldModel.Name =
+		"EmoteWorldModel"
+
+	worldModel.Parent =
+		viewport
+
+	local clone =
+		character:Clone()
+
+	clone.Name =
+		"EmoteCharacter"
+
+	clone.Parent =
+		worldModel
+
+	local humanoid =
+		clone:FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	local rootPart =
+		clone:FindFirstChild(
+			"HumanoidRootPart"
+		)
+
+	if not humanoid
+		or not rootPart
+		or not rootPart:IsA("BasePart")
+	then
+		return nil
+	end
+
+	for _, descendant in ipairs(
+		clone:GetDescendants()
+		) do
+		if descendant:IsA("Script")
+			or descendant:IsA("LocalScript")
+		then
+			descendant:Destroy()
+
+		elseif descendant:IsA("BasePart") then
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+		end
+	end
+
+	clone:PivotTo(
+		CFrame.new(0, 0, 0)
+			* CFrame.Angles(
+				0,
+				math.rad(180),
+				0
+			)
+	)
+
+	local camera =
+		Instance.new("Camera")
+
+	camera.Name =
+		"EmoteCamera"
+
+	camera.Parent =
+		viewport
+
+	viewport.CurrentCamera =
+		camera
+
+	camera.CFrame =
+		CFrame.lookAt(
+			rootPart.Position
+			+ Vector3.new(
+				0,
+				2.2,
+				6
+			),
+			rootPart.Position
+			+ Vector3.new(
+				0,
+				1.8,
+				0
+			)
+		)
+
+	local animator =
+		humanoid:FindFirstChildOfClass(
+			"Animator"
+		)
+
+	if not animator then
+		animator =
+			Instance.new("Animator")
+
+		animator.Parent =
+			humanoid
+	end
+
+	local animation =
+		Instance.new("Animation")
+
+	animation.Name =
+		"TakeTheL"
+
+	animation.AnimationId =
+		TAKE_THE_L_ANIMATION_ID
+
+	local success, track =
+		pcall(function()
+			return animator:LoadAnimation(
+				animation
+			)
+		end)
+
+	if not success
+		or not track
+	then
+		warn(
+			"Failed to load Take The L animation:",
+			track
+		)
+
+		animation:Destroy()
+
+		return nil
+	end
+
+	track.Priority =
+		Enum.AnimationPriority.Action4
+
+	track.Looped =
+		true
+
+	track:Play(
+		0,
+		1,
+		1
+	)
+
+	return track
+end
+
+local function setupUnlockViewport()
+	if unlockTrack then
+		unlockTrack:Stop(0)
+		unlockTrack = nil
+	end
+
+	unlockTrack =
+		createViewport(
+			unlockViewport
+		)
+end
+
+local function setupShowcaseViewport()
+	if showcaseTrack then
+		showcaseTrack:Stop(0)
+		showcaseTrack = nil
+	end
+
+	showcaseTrack =
+		createViewport(
+			showcaseViewport
+		)
+end
+
+local function setupBothViewports()
+	setupUnlockViewport()
+	setupShowcaseViewport()
+end
+
+local function stopEmoteViewports()
+	if unlockTrack then
+		unlockTrack:Stop(0)
+		unlockTrack = nil
+	end
+
+	if showcaseTrack then
+		showcaseTrack:Stop(0)
+		showcaseTrack = nil
+	end
+end
+
+local function showEmotes()
+	wholeAbilitiesFrame.Visible =
+		false
+
+	wholeWhipsFrame.Visible =
+		false
+
+	wholeEmotesFrame.Visible =
+		true
+
+	task.defer(function()
+		setupBothViewports()
+	end)
+end
+
+local function showAbilities()
+	stopEmoteViewports()
+
+	wholeAbilitiesFrame.Visible =
+		true
+
+	wholeEmotesFrame.Visible =
+		false
+
+	wholeWhipsFrame.Visible =
+		false
+end
+
+local function showWhips()
+	stopEmoteViewports()
+
+	wholeAbilitiesFrame.Visible =
+		false
+
+	wholeEmotesFrame.Visible =
+		false
+
+	wholeWhipsFrame.Visible =
+		true
+end
+
+abilitiesButton.Activated:Connect(
+	function()
+		showAbilities()
+	end
+)
+
+emotesButton.Activated:Connect(
+	function()
+		showEmotes()
+	end
+)
+
+whipsButton.Activated:Connect(
+	function()
+		showWhips()
+	end
+)
+
+selectL.Activated:Connect(
+	function()
+		if not wholeEmotesFrame.Visible then
+			return
+		end
+
+		setupShowcaseViewport()
+	end
+)
+
+player.CharacterAdded:Connect(
+	function()
+		if not wholeEmotesFrame.Visible then
+			return
+		end
+
+		task.wait(1)
+
+		setupBothViewports()
+	end
+)
+
+wholeAbilitiesFrame.Visible =
+	true
+
+wholeEmotesFrame.Visible =
+	false
+
+wholeWhipsFrame.Visible =
+	false
