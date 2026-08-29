@@ -1,0 +1,141 @@
+--!strict
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+
+local rig =
+	workspace:WaitForChild("LamineRig")
+
+local sound =
+	workspace:WaitForChild("laminesong") :: Sound
+
+local MAX_DISTANCE = 14
+local FADE_TIME = 0.25
+
+local targetVolume =
+	sound.Volume
+
+local fadeTween: Tween? = nil
+local isPlaying = false
+
+local function getRoot(): BasePart?
+	local character =
+		player.Character
+
+	if not character then
+		return nil
+	end
+
+	local root =
+		character:FindFirstChild(
+			"HumanoidRootPart"
+		)
+
+	if root
+		and root:IsA("BasePart")
+	then
+		return root
+	end
+
+	return nil
+end
+
+local function fadeIn()
+	if isPlaying then
+		return
+	end
+
+	isPlaying = true
+
+	if fadeTween then
+		fadeTween:Cancel()
+	end
+
+	sound.Volume = 0
+
+	if not sound.IsPlaying then
+		sound:Play()
+	end
+
+	fadeTween =
+		TweenService:Create(
+			sound,
+			TweenInfo.new(
+				FADE_TIME,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			),
+			{
+				Volume = targetVolume
+			}
+		)
+
+	fadeTween:Play()
+end
+
+local function fadeOut()
+	if not isPlaying then
+		return
+	end
+
+	isPlaying = false
+
+	if fadeTween then
+		fadeTween:Cancel()
+	end
+
+	fadeTween =
+		TweenService:Create(
+			sound,
+			TweenInfo.new(
+				FADE_TIME,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			),
+			{
+				Volume = 0
+			}
+		)
+
+	fadeTween:Play()
+
+	fadeTween.Completed:Connect(
+		function()
+			if not isPlaying then
+				sound:Stop()
+				sound.Volume =
+					targetVolume
+			end
+		end
+	)
+end
+
+RunService.RenderStepped:Connect(
+	function()
+		local root =
+			getRoot()
+
+		if not root then
+			fadeOut()
+			return
+		end
+
+		local rigPosition =
+			rig:GetPivot().Position
+
+		local distance =
+			(
+				root.Position
+				- rigPosition
+			).Magnitude
+
+		if distance <= MAX_DISTANCE then
+			fadeIn()
+		else
+			fadeOut()
+		end
+	end
+)
