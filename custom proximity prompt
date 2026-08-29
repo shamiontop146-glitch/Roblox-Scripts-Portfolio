@@ -1,0 +1,587 @@
+--!strict
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local templates =
+	ReplicatedStorage:WaitForChild("Templates")
+
+local customPromptTemplate =
+	templates:WaitForChild("CustomPrompt") :: Frame
+
+local gameUI =
+	playerGui:WaitForChild("GameUI's") :: ScreenGui
+
+local popUps =
+	gameUI:WaitForChild("PopUps") :: GuiObject
+
+local whipCoinSpin =
+	popUps:WaitForChild("WhipCoinSpin") :: Frame
+
+local whipCrate =
+	workspace:WaitForChild("WhipCrate") :: Model
+
+local crateBody =
+	whipCrate:WaitForChild("CrateBody") :: BasePart
+
+local cratePrompt =
+	crateBody:WaitForChild("ProximityPrompt") :: ProximityPrompt
+
+local PROMPT_DISTANCE = 10
+local SPIN_CLOSE_DISTANCE = 12
+
+local screenGui =
+	Instance.new("ScreenGui")
+
+screenGui.Name =
+	"CustomProximityPromptGui"
+
+screenGui.ResetOnSpawn =
+	false
+
+screenGui.IgnoreGuiInset =
+	true
+
+screenGui.DisplayOrder =
+	10000
+
+screenGui.ZIndexBehavior =
+	Enum.ZIndexBehavior.Sibling
+
+screenGui.Parent =
+	playerGui
+
+local currentFrame: Frame? = nil
+local promptVisible = false
+local spinOpen = false
+local isTweening = false
+
+local originalSpinPosition =
+	whipCoinSpin.Position
+
+local hiddenSpinPosition =
+	originalSpinPosition +
+	UDim2.fromOffset(
+		0,
+		30
+	)
+
+whipCoinSpin.Position =
+	hiddenSpinPosition
+
+whipCoinSpin.Visible =
+	false
+
+local closeButton =
+	whipCoinSpin:FindFirstChild(
+		"Close",
+		true
+	)
+
+local function getVisibleCrateParts(): {BasePart}
+	local parts = {}
+
+	for _, object in ipairs(
+		whipCrate:GetDescendants()
+		) do
+		if object:IsA("BasePart")
+			and object.Transparency < 1
+		then
+			table.insert(
+				parts,
+				object
+			)
+		end
+	end
+
+	return parts
+end
+
+local function getCrateCenter(): Vector3
+	local parts =
+		getVisibleCrateParts()
+
+	if #parts == 0 then
+		return whipCrate:GetPivot().Position
+	end
+
+	local total =
+		Vector3.new(
+			0,
+			0,
+			0
+		)
+
+	for _, part in ipairs(parts) do
+		total += part.Position
+	end
+
+	return total / #parts
+end
+
+local function getCrateTopPosition(): Vector3
+	local parts =
+		getVisibleCrateParts()
+
+	if #parts == 0 then
+		return whipCrate:GetPivot().Position
+	end
+
+	local minY = math.huge
+	local maxY = -math.huge
+	local minX = math.huge
+	local maxX = -math.huge
+	local minZ = math.huge
+	local maxZ = -math.huge
+
+	for _, part in ipairs(parts) do
+		local halfSize =
+			part.Size * 0.5
+
+		local corners = {
+			Vector3.new(
+				-halfSize.X,
+				-halfSize.Y,
+				-halfSize.Z
+			),
+			Vector3.new(
+				-halfSize.X,
+				-halfSize.Y,
+				halfSize.Z
+			),
+			Vector3.new(
+				-halfSize.X,
+				halfSize.Y,
+				-halfSize.Z
+			),
+			Vector3.new(
+				-halfSize.X,
+				halfSize.Y,
+				halfSize.Z
+			),
+			Vector3.new(
+				halfSize.X,
+				-halfSize.Y,
+				-halfSize.Z
+			),
+			Vector3.new(
+				halfSize.X,
+				-halfSize.Y,
+				halfSize.Z
+			),
+			Vector3.new(
+				halfSize.X,
+				halfSize.Y,
+				-halfSize.Z
+			),
+			Vector3.new(
+				halfSize.X,
+				halfSize.Y,
+				halfSize.Z
+			),
+		}
+
+		for _, corner in ipairs(corners) do
+			local worldPoint =
+				part.CFrame:PointToWorldSpace(
+					corner
+				)
+
+			minX =
+				math.min(
+					minX,
+					worldPoint.X
+				)
+
+			maxX =
+				math.max(
+					maxX,
+					worldPoint.X
+				)
+
+			minY =
+				math.min(
+					minY,
+					worldPoint.Y
+				)
+
+			maxY =
+				math.max(
+					maxY,
+					worldPoint.Y
+				)
+
+			minZ =
+				math.min(
+					minZ,
+					worldPoint.Z
+				)
+
+			maxZ =
+				math.max(
+					maxZ,
+					worldPoint.Z
+				)
+		end
+	end
+
+	return Vector3.new(
+		(minX + maxX) * 0.5,
+		maxY + 0.35,
+		(minZ + maxZ) * 0.5
+	)
+end
+
+local function hidePrompt()
+	promptVisible =
+		false
+
+	if currentFrame then
+		currentFrame:Destroy()
+		currentFrame =
+			nil
+	end
+end
+
+local function closeSpin()
+	if not spinOpen
+		or isTweening
+	then
+		return
+	end
+
+	spinOpen =
+		false
+
+	isTweening =
+		true
+
+	local tween =
+		TweenService:Create(
+			whipCoinSpin,
+			TweenInfo.new(
+				0.2,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.In
+			),
+			{
+				Position =
+				hiddenSpinPosition
+			}
+		)
+
+	tween:Play()
+
+	tween.Completed:Connect(
+		function()
+			whipCoinSpin.Visible =
+				false
+
+			whipCoinSpin.Position =
+				hiddenSpinPosition
+
+			isTweening =
+				false
+		end
+	)
+end
+
+local function openSpin()
+	if spinOpen
+		or isTweening
+	then
+		return
+	end
+
+	spinOpen =
+		true
+
+	isTweening =
+		true
+
+	hidePrompt()
+
+	whipCoinSpin.Visible =
+		true
+
+	whipCoinSpin.Position =
+		hiddenSpinPosition
+
+	local tween =
+		TweenService:Create(
+			whipCoinSpin,
+			TweenInfo.new(
+				0.3,
+				Enum.EasingStyle.Quint,
+				Enum.EasingDirection.Out
+			),
+			{
+				Position =
+				originalSpinPosition
+			}
+		)
+
+	tween:Play()
+
+	tween.Completed:Connect(
+		function()
+			whipCoinSpin.Position =
+				originalSpinPosition
+
+			isTweening =
+				false
+		end
+	)
+end
+
+if closeButton
+	and closeButton:IsA("GuiButton")
+then
+	closeButton.Activated:Connect(
+		function()
+			closeSpin()
+		end
+	)
+end
+
+local function showPrompt()
+	if promptVisible
+		or spinOpen
+	then
+		return
+	end
+
+	local frame =
+		customPromptTemplate:Clone()
+
+	frame.Name =
+		"ActiveCustomPrompt"
+
+	frame.Visible =
+		true
+
+	frame.AnchorPoint =
+		Vector2.new(
+			0.5,
+			1
+		)
+
+	local button =
+		frame:FindFirstChild(
+			"Button",
+			true
+		)
+
+	local keyLabel =
+		frame:FindFirstChild(
+			"KeyLabel",
+			true
+		)
+
+	local actionText =
+		frame:FindFirstChild(
+			"ActionText",
+			true
+		)
+
+	local objectText =
+		frame:FindFirstChild(
+			"ObjectText",
+			true
+		)
+
+	if keyLabel
+		and keyLabel:IsA("TextLabel")
+	then
+		keyLabel.Text =
+			"E"
+	end
+
+	if actionText
+		and actionText:IsA("TextLabel")
+	then
+		actionText.Text =
+			cratePrompt.ActionText ~= ""
+			and cratePrompt.ActionText
+			or "Open"
+	end
+
+	if objectText
+		and objectText:IsA("TextLabel")
+	then
+		objectText.Text =
+			cratePrompt.ObjectText ~= ""
+			and cratePrompt.ObjectText
+			or "Whip Crate"
+	end
+
+	frame.Parent =
+		screenGui
+
+	currentFrame =
+		frame
+
+	promptVisible =
+		true
+
+	if button
+		and button:IsA("GuiButton")
+	then
+		button.Activated:Connect(
+			function()
+				if not promptVisible then
+					return
+				end
+
+				openSpin()
+			end
+		)
+	end
+end
+
+local function getCharacterRoot(): BasePart?
+	local character =
+		player.Character
+
+	if not character then
+		return nil
+	end
+
+	local root =
+		character:FindFirstChild(
+			"HumanoidRootPart"
+		)
+
+	if root
+		and root:IsA("BasePart")
+	then
+		return root
+	end
+
+	return nil
+end
+
+UserInputService.InputBegan:Connect(
+	function(
+		input,
+		gameProcessed
+	)
+		if gameProcessed then
+			return
+		end
+
+		if input.KeyCode
+			~= Enum.KeyCode.E
+		then
+			return
+		end
+
+		if spinOpen then
+			closeSpin()
+			return
+		end
+
+		if promptVisible then
+			openSpin()
+		end
+	end
+)
+
+RunService.RenderStepped:Connect(
+	function()
+		local root =
+			getCharacterRoot()
+
+		if not root then
+			hidePrompt()
+
+			if spinOpen then
+				closeSpin()
+			end
+
+			return
+		end
+
+		local distance =
+			(
+				root.Position
+				- getCrateCenter()
+			).Magnitude
+
+		if spinOpen then
+			if distance >
+				SPIN_CLOSE_DISTANCE
+			then
+				closeSpin()
+			end
+
+			return
+		end
+
+		if distance <=
+			PROMPT_DISTANCE
+		then
+			showPrompt()
+		else
+			hidePrompt()
+		end
+
+		if not currentFrame then
+			return
+		end
+
+		local camera =
+			workspace.CurrentCamera
+
+		if not camera then
+			return
+		end
+
+		local screenPosition =
+			camera:WorldToViewportPoint(
+				getCrateTopPosition()
+			)
+
+		if screenPosition.Z <= 0 then
+			currentFrame.Visible =
+				false
+
+			return
+		end
+
+		currentFrame.Visible =
+			true
+
+		currentFrame.Position =
+			UDim2.fromOffset(
+				screenPosition.X,
+				screenPosition.Y
+			)
+	end
+)
+
+player.CharacterAdded:Connect(
+	function()
+		hidePrompt()
+
+		if spinOpen then
+			spinOpen =
+				false
+
+			isTweening =
+				false
+
+			whipCoinSpin.Visible =
+				false
+
+			whipCoinSpin.Position =
+				hiddenSpinPosition
+		end
+	end
+)
