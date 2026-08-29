@@ -1,0 +1,320 @@
+--!strict
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LIFESTEAL_PERCENT = 0.25
+local LIFESTEAL_DURATION = 7
+
+local LIFESTEAL_VFX_NAME = "LifeStealVFX"
+
+local activeVFX: {[Model]: Instance} = {}
+
+local function getVFXTemplate(): Instance?
+	local template =
+		ReplicatedStorage:FindFirstChild(
+			LIFESTEAL_VFX_NAME
+		)
+
+	if template then
+		return template
+	end
+
+	warn(
+		"[LifeSteal] LifeStealVFX was not found in ReplicatedStorage"
+	)
+
+	return nil
+end
+
+local function removeVFX(character: Model)
+	local existing =
+		character:FindFirstChild(
+			"ActiveLifeStealVFX"
+		)
+
+	if existing then
+		existing:Destroy()
+	end
+
+	activeVFX[character] = nil
+end
+
+local function setupPart(
+	part: BasePart
+)
+	part.Anchored = false
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Massless = true
+end
+
+local function createVFX(
+	character: Model
+): Instance?
+	local template =
+		getVFXTemplate()
+
+	if not template then
+		return nil
+	end
+
+	local hrp =
+		character:FindFirstChild(
+			"HumanoidRootPart"
+		)
+
+	if not hrp
+		or not hrp:IsA("BasePart")
+	then
+		return nil
+	end
+
+	removeVFX(character)
+
+	local vfx =
+		template:Clone()
+
+	vfx.Name =
+		"ActiveLifeStealVFX"
+
+	vfx.Parent =
+		character
+
+	local hostPart =
+		vfx:FindFirstChild(
+			"VFX_HostPart",
+			true
+		)
+
+	if not hostPart
+		or not hostPart:IsA("BasePart")
+	then
+		warn(
+			"[LifeSteal] VFX_HostPart was not found inside LifeStealVFX"
+		)
+
+		vfx:Destroy()
+
+		return nil
+	end
+
+	setupPart(hostPart)
+
+	hostPart.CFrame =
+		hrp.CFrame
+
+	local weld =
+		Instance.new("WeldConstraint")
+
+	weld.Name =
+		"LifeStealVFXWeld"
+
+	weld.Part0 =
+		hrp
+
+	weld.Part1 =
+		hostPart
+
+	weld.Parent =
+		hostPart
+
+	activeVFX[character] =
+		vfx
+
+	return vfx
+end
+
+local function activateClient(
+	ctx: any
+): any
+	local character =
+		ctx.character
+
+	if character then
+		local vfx =
+			createVFX(character)
+
+		if vfx then
+			task.delay(
+				LIFESTEAL_DURATION,
+				function()
+					local active =
+						activeVFX[character]
+
+					if active
+						and active == vfx
+					then
+						removeVFX(character)
+					end
+				end
+			)
+		end
+	end
+
+	return {
+		duration =
+			LIFESTEAL_DURATION,
+	}
+end
+
+local function activateServer(
+	ctx: any
+)
+	local player =
+		ctx.player
+
+	local character =
+		player.Character
+
+	if not character then
+		return
+	end
+
+	local humanoid =
+		character:FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	if not humanoid
+		or humanoid.Health <= 0
+	then
+		return
+	end
+
+	if character:GetAttribute(
+		"LifestealActive"
+		) == true
+	then
+		return
+	end
+
+	character:SetAttribute(
+		"LifestealActive",
+		true
+	)
+
+	character:SetAttribute(
+		"LifestealPercent",
+		LIFESTEAL_PERCENT
+	)
+
+	ctx.broadcast({
+		duration =
+			LIFESTEAL_DURATION,
+	})
+
+	task.delay(
+		LIFESTEAL_DURATION,
+		function()
+			if not character
+				or not character.Parent
+			then
+				return
+			end
+
+			character:SetAttribute(
+				"LifestealActive",
+				false
+			)
+
+			character:SetAttribute(
+				"LifestealPercent",
+				nil
+			)
+
+			removeVFX(
+				character
+			)
+		end
+	)
+end
+
+local function onReplicate(
+	ctx: any
+)
+	local actor =
+		ctx.actor
+
+	if not actor
+		or not actor:IsA("Player")
+	then
+		return
+	end
+
+	local character =
+		actor.Character
+
+	if not character then
+		return
+	end
+
+	local humanoid =
+		character:FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	if not humanoid
+		or humanoid.Health <= 0
+	then
+		return
+	end
+
+	removeVFX(
+		character
+	)
+
+	local vfx =
+		createVFX(character)
+
+	if not vfx then
+		return
+	end
+
+	local duration =
+		LIFESTEAL_DURATION
+
+	if ctx.payload
+		and type(
+			ctx.payload.duration
+		) == "number"
+	then
+		duration =
+			ctx.payload.duration
+	end
+
+	task.delay(
+		duration,
+		function()
+			if not character
+				or not character.Parent
+			then
+				return
+			end
+
+			local active =
+				activeVFX[character]
+
+			if active
+				and active == vfx
+			then
+				removeVFX(character)
+			end
+		end
+	)
+end
+
+return {
+	id = "LifeSteal",
+	displayName = "Lifesteal",
+	cooldown = 12,
+
+	activateClient =
+		activateClient,
+
+	activateServer =
+		activateServer,
+
+	onReplicate =
+		onReplicate,
+}
