@@ -1,0 +1,74 @@
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local DASH_SPEED = 150
+local DASH_DURATION = 0.35
+
+local dashAnimation = Instance.new("Animation")
+dashAnimation.AnimationId = "rbxassetid://98735305588715"
+
+local function playDashVFX(dashCFrame: CFrame)
+	local template = ReplicatedStorage:FindFirstChild("DashVFX")
+	if not template then
+		return
+	end
+	local vfxModel = template:FindFirstChild("Model")
+	if not vfxModel then
+		return
+	end
+	local vfxPart = vfxModel:Clone() :: BasePart
+	local lookVector = dashCFrame.LookVector
+	local rightVector = dashCFrame.RightVector
+	local behindDirection = -lookVector
+	vfxPart.CFrame = CFrame.fromMatrix(dashCFrame.Position, rightVector, behindDirection)
+	vfxPart.Anchored = true
+	vfxPart.Parent = workspace
+	task.delay(0.5, function()
+		if vfxPart and vfxPart.Parent then
+			vfxPart.Parent = nil
+		end
+	end)
+end
+
+local function activateClient(ctx: any): any
+	local humanoid = ctx.humanoid
+	local hrp = ctx.hrp
+
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if animator then
+		local track = animator:LoadAnimation(dashAnimation)
+		track:Play()
+		task.delay(DASH_DURATION, function()
+			if track.IsPlaying then
+				track:Stop()
+			end
+		end)
+	end
+
+	local lookVector = hrp.CFrame.LookVector
+	local dashDirection = Vector3.new(lookVector.X, 0, lookVector.Z).Unit
+	hrp.AssemblyLinearVelocity = dashDirection * DASH_SPEED + Vector3.new(0, hrp.AssemblyLinearVelocity.Y, 0)
+
+	playDashVFX(hrp.CFrame)
+	return { cframe = hrp.CFrame }
+end
+
+local function activateServer(ctx: any)
+	ctx.broadcast(ctx.payload)
+end
+
+local function onReplicate(ctx: any)
+	local payload = ctx.payload
+	if payload and typeof(payload.cframe) == "CFrame" then
+		playDashVFX(payload.cframe)
+	end
+end
+
+return {
+	id = "Dash",
+	displayName = "Dash",
+	cooldown = 5,
+	activateClient = activateClient,
+	activateServer = activateServer,
+	onReplicate = onReplicate,
+}
