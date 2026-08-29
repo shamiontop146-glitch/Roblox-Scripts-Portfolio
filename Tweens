@@ -1,0 +1,357 @@
+local TweenService = game:GetService("TweenService")
+
+local lobbyUI = script.Parent
+
+local loadoutButton = lobbyUI:WaitForChild("LoadoutButton")
+local clickSound = lobbyUI:WaitForChild("ClickSound")
+local hoverSound = lobbyUI:WaitForChild("HoverSound")
+
+local loadoutGui = lobbyUI:WaitForChild("LoadoutGui")
+local mainModalFrame = loadoutGui:WaitForChild("MainModalFrame")
+
+local topHeaderBar = mainModalFrame:WaitForChild("TopHeaderBar")
+local closeButton = topHeaderBar:WaitForChild("CloseButton")
+
+local contentContainer = mainModalFrame:WaitForChild("ContentContainer")
+
+local primaryRow = contentContainer:WaitForChild("PrimaryRow")
+local primaryChangeButton = primaryRow:WaitForChild("ChangeButton")
+
+local secondaryRow = contentContainer:WaitForChild("SecondaryRow")
+local secondaryChangeButton = secondaryRow:WaitForChild("ChangeButton")
+
+local powerCatalogGui = lobbyUI:WaitForChild("PowerCatalogGui")
+
+local primaryPowersMenu = powerCatalogGui:WaitForChild("PrimaryPowersMenu")
+local secondaryPowersMenu = powerCatalogGui:WaitForChild("SecondaryPowersMenu")
+
+local primaryTopHeaderBar = primaryPowersMenu:WaitForChild("TopHeaderBar")
+local primaryCatalogCloseButton = primaryTopHeaderBar:WaitForChild("CloseButton")
+
+local secondaryTopHeaderBar = secondaryPowersMenu:WaitForChild("TopHeaderBar")
+local secondaryCatalogCloseButton = secondaryTopHeaderBar:WaitForChild("CloseButton")
+
+local originalButtonSizes = {
+	LoadoutButton = loadoutButton.Size,
+	CloseButton = closeButton.Size,
+	PrimaryChangeButton = primaryChangeButton.Size,
+	SecondaryChangeButton = secondaryChangeButton.Size,
+	PrimaryCatalogCloseButton = primaryCatalogCloseButton.Size,
+	SecondaryCatalogCloseButton = secondaryCatalogCloseButton.Size
+}
+
+local originalFrameSize = mainModalFrame.Size
+local originalPrimaryCatalogSize = primaryPowersMenu.Size
+local originalSecondaryCatalogSize = secondaryPowersMenu.Size
+
+local buttonTweenInfo = TweenInfo.new(
+	0.12,
+	Enum.EasingStyle.Quad,
+	Enum.EasingDirection.Out
+)
+
+local openTweenInfo = TweenInfo.new(
+	0.32,
+	Enum.EasingStyle.Back,
+	Enum.EasingDirection.Out
+)
+
+local closeTweenInfo = TweenInfo.new(
+	0.2,
+	Enum.EasingStyle.Quad,
+	Enum.EasingDirection.In
+)
+
+local catalogOpenTweenInfo = TweenInfo.new(
+	0.3,
+	Enum.EasingStyle.Back,
+	Enum.EasingDirection.Out
+)
+
+local catalogCloseTweenInfo = TweenInfo.new(
+	0.18,
+	Enum.EasingStyle.Quad,
+	Enum.EasingDirection.In
+)
+
+local isOpen = false
+local isAnimating = false
+local catalogOpen = false
+local currentCatalog = nil
+
+loadoutGui.Enabled = false
+mainModalFrame.Visible = false
+
+powerCatalogGui.Enabled = false
+primaryPowersMenu.Visible = false
+secondaryPowersMenu.Visible = false
+
+local function playClick()
+	clickSound:Play()
+end
+
+local function playHover()
+	hoverSound:Play()
+end
+
+local function getHoverSize(originalSize)
+	return UDim2.new(
+		originalSize.X.Scale * 1.05,
+		originalSize.X.Offset * 1.05,
+		originalSize.Y.Scale * 1.05,
+		originalSize.Y.Offset * 1.05
+	)
+end
+
+local function setupButtonHover(button, originalSize)
+	local hoverSize = getHoverSize(originalSize)
+
+	button.MouseEnter:Connect(function()
+		playHover()
+
+		TweenService:Create(
+			button,
+			buttonTweenInfo,
+			{
+				Size = hoverSize
+			}
+		):Play()
+	end)
+
+	button.MouseLeave:Connect(function()
+		TweenService:Create(
+			button,
+			buttonTweenInfo,
+			{
+				Size = originalSize
+			}
+		):Play()
+	end)
+end
+
+setupButtonHover(
+	loadoutButton,
+	originalButtonSizes.LoadoutButton
+)
+
+setupButtonHover(
+	closeButton,
+	originalButtonSizes.CloseButton
+)
+
+setupButtonHover(
+	primaryChangeButton,
+	originalButtonSizes.PrimaryChangeButton
+)
+
+setupButtonHover(
+	secondaryChangeButton,
+	originalButtonSizes.SecondaryChangeButton
+)
+
+setupButtonHover(
+	primaryCatalogCloseButton,
+	originalButtonSizes.PrimaryCatalogCloseButton
+)
+
+setupButtonHover(
+	secondaryCatalogCloseButton,
+	originalButtonSizes.SecondaryCatalogCloseButton
+)
+
+local function openLoadout()
+	if isOpen or isAnimating or catalogOpen then
+		return
+	end
+
+	isAnimating = true
+	isOpen = true
+
+	loadoutGui.Enabled = true
+	mainModalFrame.Visible = true
+
+	mainModalFrame.Size = UDim2.new(
+		originalFrameSize.X.Scale * 0.85,
+		originalFrameSize.X.Offset * 0.85,
+		originalFrameSize.Y.Scale * 0.85,
+		originalFrameSize.Y.Offset * 0.85
+	)
+
+	local tween = TweenService:Create(
+		mainModalFrame,
+		openTweenInfo,
+		{
+			Size = originalFrameSize
+		}
+	)
+
+	tween:Play()
+	tween.Completed:Wait()
+
+	isAnimating = false
+end
+
+local function closeLoadout()
+	if not isOpen or isAnimating then
+		return
+	end
+
+	isAnimating = true
+
+	local tween = TweenService:Create(
+		mainModalFrame,
+		closeTweenInfo,
+		{
+			Size = UDim2.new(
+				originalFrameSize.X.Scale * 0.85,
+				originalFrameSize.X.Offset * 0.85,
+				originalFrameSize.Y.Scale * 0.85,
+				originalFrameSize.Y.Offset * 0.85
+			)
+		}
+	)
+
+	tween:Play()
+	tween.Completed:Wait()
+
+	mainModalFrame.Visible = false
+	loadoutGui.Enabled = false
+	mainModalFrame.Size = originalFrameSize
+
+	isOpen = false
+	isAnimating = false
+end
+
+local function closeCatalog(menu, originalSize)
+	if not catalogOpen or isAnimating or currentCatalog ~= menu then
+		return
+	end
+
+	isAnimating = true
+
+	local tween = TweenService:Create(
+		menu,
+		catalogCloseTweenInfo,
+		{
+			Size = UDim2.new(
+				originalSize.X.Scale * 0.85,
+				originalSize.X.Offset * 0.85,
+				originalSize.Y.Scale * 0.85,
+				originalSize.Y.Offset * 0.85
+			)
+		}
+	)
+
+	tween:Play()
+	tween.Completed:Wait()
+
+	menu.Visible = false
+	menu.Size = originalSize
+
+	catalogOpen = false
+	currentCatalog = nil
+
+	powerCatalogGui.Enabled = false
+
+	isAnimating = false
+end
+
+local function openCatalog(menu, originalSize)
+	if isAnimating or catalogOpen then
+		return
+	end
+
+	isAnimating = true
+
+	if isOpen then
+		local loadoutCloseTween = TweenService:Create(
+			mainModalFrame,
+			closeTweenInfo,
+			{
+				Size = UDim2.new(
+					originalFrameSize.X.Scale * 0.85,
+					originalFrameSize.X.Offset * 0.85,
+					originalFrameSize.Y.Scale * 0.85,
+					originalFrameSize.Y.Offset * 0.85
+				)
+			}
+		)
+
+		loadoutCloseTween:Play()
+		loadoutCloseTween.Completed:Wait()
+
+		mainModalFrame.Visible = false
+		loadoutGui.Enabled = false
+		mainModalFrame.Size = originalFrameSize
+
+		isOpen = false
+	end
+
+	powerCatalogGui.Enabled = true
+	menu.Visible = true
+
+	menu.Size = UDim2.new(
+		originalSize.X.Scale * 0.85,
+		originalSize.X.Offset * 0.85,
+		originalSize.Y.Scale * 0.85,
+		originalSize.Y.Offset * 0.85
+	)
+
+	local catalogTween = TweenService:Create(
+		menu,
+		catalogOpenTweenInfo,
+		{
+			Size = originalSize
+		}
+	)
+
+	catalogOpen = true
+	currentCatalog = menu
+
+	catalogTween:Play()
+	catalogTween.Completed:Wait()
+
+	isAnimating = false
+end
+
+loadoutButton.MouseButton1Click:Connect(function()
+	playClick()
+
+	if catalogOpen then
+		closeCatalog(currentCatalog, currentCatalog == primaryPowersMenu and originalPrimaryCatalogSize or originalSecondaryCatalogSize)
+	elseif isOpen then
+		closeLoadout()
+	else
+		openLoadout()
+	end
+end)
+
+closeButton.MouseButton1Click:Connect(function()
+	playClick()
+
+	if catalogOpen then
+		closeCatalog(currentCatalog, currentCatalog == primaryPowersMenu and originalPrimaryCatalogSize or originalSecondaryCatalogSize)
+	elseif isOpen then
+		closeLoadout()
+	end
+end)
+
+primaryCatalogCloseButton.MouseButton1Click:Connect(function()
+	playClick()
+	closeCatalog(primaryPowersMenu, originalPrimaryCatalogSize)
+end)
+
+secondaryCatalogCloseButton.MouseButton1Click:Connect(function()
+	playClick()
+	closeCatalog(secondaryPowersMenu, originalSecondaryCatalogSize)
+end)
+
+primaryChangeButton.MouseButton1Click:Connect(function()
+	playClick()
+	openCatalog(primaryPowersMenu, originalPrimaryCatalogSize)
+end)
+
+secondaryChangeButton.MouseButton1Click:Connect(function()
+	playClick()
+	openCatalog(secondaryPowersMenu, originalSecondaryCatalogSize)
+end)
