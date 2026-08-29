@@ -1,0 +1,237 @@
+--!strict
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+
+local Remotes = require(
+	Shared:WaitForChild("Remotes")
+)
+
+local ItemCatalog = require(
+	Shared:WaitForChild("ItemCatalog")
+)
+
+local DataService = require(
+	ServerScriptService
+		:WaitForChild("ServerModules")
+		:WaitForChild("Services")
+		:WaitForChild("DataService")
+)
+
+local equipAbilityRemote: RemoteEvent =
+	Remotes.EquipAbility
+
+local equipLassoRemote: RemoteEvent =
+	Remotes.EquipLasso
+
+local ABILITY_SLOT_2_GAMEPASS_ID =
+	1953634255
+
+local function ownsAbilitySlot2(
+	player: Player
+): boolean
+	if RunService:IsStudio() then
+		return true
+	end
+
+	local success, ownsPass =
+		pcall(function()
+			return MarketplaceService:UserOwnsGamePassAsync(
+				player.UserId,
+				ABILITY_SLOT_2_GAMEPASS_ID
+			)
+		end)
+
+	if not success then
+		return false
+	end
+
+	return ownsPass == true
+end
+
+local function equipAbility(
+	player: Player,
+	abilityId: string,
+	slot: number
+)
+	local data =
+		DataService.getData(player)
+
+	if not data then
+		return
+	end
+
+	if not data.Inventory
+		or not data.Inventory.Abilities
+	then
+		return
+	end
+
+	if not table.find(
+		data.Inventory.Abilities,
+		abilityId
+		) then
+		return
+	end
+
+	if slot == 2
+		and not ownsAbilitySlot2(player)
+	then
+		MarketplaceService:PromptGamePassPurchase(
+			player,
+			ABILITY_SLOT_2_GAMEPASS_ID
+		)
+
+		return
+	end
+
+	DataService.update(
+		player,
+		function(profileData)
+			local slot1 =
+				profileData.Equipped.Ability
+
+			local slot2 =
+				profileData.Equipped.Ability2
+
+			if slot == 1 then
+				if slot1 == abilityId then
+					return
+				end
+
+				if slot2 == abilityId then
+					profileData.Equipped.Ability =
+						slot2
+
+					profileData.Equipped.Ability2 =
+						slot1
+
+					return
+				end
+
+				profileData.Equipped.Ability =
+					abilityId
+
+			elseif slot == 2 then
+				if slot2 == abilityId then
+					return
+				end
+
+				if slot1 == abilityId then
+					profileData.Equipped.Ability =
+						slot2
+
+					profileData.Equipped.Ability2 =
+						slot1
+
+					return
+				end
+
+				profileData.Equipped.Ability2 =
+					abilityId
+			end
+		end
+	)
+end
+
+local function equipLasso(
+	player: Player,
+	lassoId: string
+)
+	local data =
+		DataService.getData(player)
+
+	if not data then
+		return
+	end
+
+	local item =
+		ItemCatalog.get(lassoId)
+
+	if not item then
+		return
+	end
+
+	if item.Category ~= "Lasso" then
+		return
+	end
+
+	if RunService:IsStudio() then
+		if lassoId ~= "DefaultLasso"
+			and lassoId ~= "ChainWhip"
+			and lassoId ~= "HookWhip"
+		then
+			return
+		end
+	else
+		if not data.Inventory
+			or not data.Inventory.Lassos
+		then
+			return
+		end
+
+		if not table.find(
+			data.Inventory.Lassos,
+			lassoId
+			) then
+			return
+		end
+	end
+
+	DataService.update(
+		player,
+		function(profileData)
+			profileData.Equipped.Lasso =
+				lassoId
+		end
+	)
+end
+
+equipAbilityRemote.OnServerEvent:Connect(
+	function(
+		player: Player,
+		abilityId: any,
+		slot: any
+	)
+		if typeof(abilityId) ~= "string" then
+			return
+		end
+
+		if typeof(slot) ~= "number" then
+			return
+		end
+
+		if slot ~= 1
+			and slot ~= 2
+		then
+			return
+		end
+
+		equipAbility(
+			player,
+			abilityId,
+			slot
+		)
+	end
+)
+
+equipLassoRemote.OnServerEvent:Connect(
+	function(
+		player: Player,
+		lassoId: any
+	)
+		if typeof(lassoId) ~= "string" then
+			return
+		end
+
+		equipLasso(
+			player,
+			lassoId
+		)
+	end
+)
