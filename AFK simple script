@@ -1,7 +1,0 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local AFKEvent = ReplicatedStorage:WaitForChild("AFKEvent")
-
-AFKEvent.OnServerEvent:Connect(function(player, isAFK)
-	player:SetAttribute("AFK", isAFK == true)
-end)
