@@ -1,0 +1,42 @@
+--!strict
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local isServer = RunService:IsServer()
+
+local function resolve(name: string): RemoteEvent
+	if isServer then
+		local existing = ReplicatedStorage:FindFirstChild(name)
+
+		if existing and existing:IsA("RemoteEvent") then
+			return existing	
+		end
+
+		local event = Instance.new("RemoteEvent")
+		event.Name = name
+		event.Parent = ReplicatedStorage
+
+		return event
+	end
+
+	return ReplicatedStorage:WaitForChild(name) :: RemoteEvent
+end
+
+local Remotes = {
+	Whip = resolve("WhipEvent"),
+	Round = resolve("RoundEvent"),
+	Dash = resolve("DashEvent"),
+	ChainsVFX = resolve("ChainsVFXEvent"),
+	Data = resolve("DataEvent"),
+	RequestData = resolve("RequestData"),
+	Inventory = resolve("InventoryEvent"),
+	Ability = resolve("AbilityEvent"),
+	Kill = resolve("KillEvent"),
+	Quest = resolve("QuestEvent"),
+	EquipEmote = resolve("EquipEmote"),
+	EquipAbility = resolve("EquipAbility"),
+	EquipLasso = resolve("EquipLasso"),
+}
+
+return Remotes
