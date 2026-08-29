@@ -1,0 +1,553 @@
+--!strict
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local stormRemote =
+	ReplicatedStorage:WaitForChild("StormWarningState") :: RemoteEvent
+
+local lightningTemplate =
+	ReplicatedStorage:WaitForChild("LightningStrike")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "StormScreenEffect"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 1000
+screenGui.Parent = playerGui
+
+local tint = Instance.new("Frame")
+tint.Name = "StormTint"
+tint.Size = UDim2.fromScale(1, 1)
+tint.Position = UDim2.fromScale(0, 0)
+tint.BackgroundColor3 = Color3.fromRGB(0, 190, 255)
+tint.BackgroundTransparency = 1
+tint.BorderSizePixel = 0
+tint.ZIndex = 1
+tint.Parent = screenGui
+
+local vignette = Instance.new("ImageLabel")
+vignette.Name = "StormVignette"
+vignette.Size = UDim2.fromScale(1.15, 1.15)
+vignette.Position = UDim2.fromScale(-0.075, -0.075)
+vignette.BackgroundTransparency = 1
+vignette.Image = "rbxassetid://5028857084"
+vignette.ImageColor3 = Color3.fromRGB(0, 190, 255)
+vignette.ImageTransparency = 1
+vignette.ScaleType = Enum.ScaleType.Stretch
+vignette.ZIndex = 2
+vignette.Parent = screenGui
+
+local pulse = Instance.new("Frame")
+pulse.Name = "StormPulse"
+pulse.Size = UDim2.fromScale(1, 1)
+pulse.Position = UDim2.fromScale(0, 0)
+pulse.BackgroundColor3 = Color3.fromRGB(0, 130, 255)
+pulse.BackgroundTransparency = 1
+pulse.BorderSizePixel = 0
+pulse.ZIndex = 3
+pulse.Parent = screenGui
+
+local rainContainer = Instance.new("Frame")
+rainContainer.Name = "StormRain"
+rainContainer.Size = UDim2.fromScale(1, 1)
+rainContainer.Position = UDim2.fromScale(0, 0)
+rainContainer.BackgroundTransparency = 1
+rainContainer.BorderSizePixel = 0
+rainContainer.ZIndex = 8
+rainContainer.ClipsDescendants = true
+rainContainer.Parent = screenGui
+
+local lightningFlash = Instance.new("Frame")
+lightningFlash.Name = "LightningFlash"
+lightningFlash.Size = UDim2.fromScale(1, 1)
+lightningFlash.Position = UDim2.fromScale(0, 0)
+lightningFlash.BackgroundColor3 = Color3.fromRGB(220, 245, 255)
+lightningFlash.BackgroundTransparency = 1
+lightningFlash.BorderSizePixel = 0
+lightningFlash.ZIndex = 20
+lightningFlash.Parent = screenGui
+
+local active = false
+local pulseConnection: RBXScriptConnection? = nil
+local rainConnection: RBXScriptConnection? = nil
+local lightningThreadId = 0
+local tweenId = 0
+local currentLightning: Instance? = nil
+
+local RAIN_COUNT = 32
+
+type RainDrop = {
+	gui: Frame,
+	x: number,
+	y: number,
+	speed: number,
+	length: number,
+	width: number,
+	drift: number,
+	rotation: number,
+}
+
+local rainDrops: { RainDrop } = {}
+
+local function createRainDrops()
+	for _, drop in ipairs(rainDrops) do
+		drop.gui:Destroy()
+	end
+
+	table.clear(rainDrops)
+
+	for _ = 1, RAIN_COUNT do
+		local drop = Instance.new("Frame")
+		drop.Name = "RainDrop"
+		drop.AnchorPoint = Vector2.new(0.5, 0.5)
+		drop.BackgroundColor3 = Color3.fromRGB(205, 240, 255)
+		drop.BackgroundTransparency = math.random(72, 88) / 100
+		drop.BorderSizePixel = 0
+		drop.ZIndex = 8
+		drop.Parent = rainContainer
+
+		local width = math.random(1, 2)
+		local length = math.random(10, 24)
+
+		drop.Size = UDim2.fromOffset(width, length)
+
+		local x = math.random(0, 1000) / 1000
+		local y = math.random(-120, 1000) / 1000
+
+		local rotation = math.random(-12, 12)
+
+		drop.Position = UDim2.fromScale(x, y)
+		drop.Rotation = rotation
+
+		local rainDrop: RainDrop = {
+			gui = drop,
+			x = x,
+			y = y,
+			speed = math.random(55, 105) / 100,
+			length = length,
+			width = width,
+			drift = math.random(-8, 8) / 10000,
+			rotation = rotation,
+		}
+
+		table.insert(rainDrops, rainDrop)
+	end
+end
+
+local function resetRainDrop(drop: RainDrop)
+	drop.x = math.random(0, 1000) / 1000
+	drop.y = math.random(-180, -20) / 1000
+	drop.speed = math.random(55, 105) / 100
+	drop.drift = math.random(-8, 8) / 10000
+
+	drop.gui.BackgroundTransparency =
+		math.random(72, 88) / 100
+
+	drop.gui.Position =
+		UDim2.fromScale(drop.x, drop.y)
+end
+
+local function startRain()
+	if rainConnection then
+		rainConnection:Disconnect()
+		rainConnection = nil
+	end
+
+	createRainDrops()
+
+	local lastTime = os.clock()
+
+	rainConnection = RunService.RenderStepped:Connect(function()
+		if not active then
+			return
+		end
+
+		local now = os.clock()
+		local deltaTime = math.min(now - lastTime, 0.05)
+		lastTime = now
+
+		for _, drop in ipairs(rainDrops) do
+			drop.y += drop.speed * deltaTime
+			drop.x += drop.drift * deltaTime
+
+			if drop.x > 1.05 then
+				drop.x = -0.05
+			elseif drop.x < -0.05 then
+				drop.x = 1.05
+			end
+
+			if drop.y > 1.08 then
+				resetRainDrop(drop)
+			else
+				drop.gui.Position =
+					UDim2.fromScale(drop.x, drop.y)
+			end
+		end
+	end)
+end
+
+local function stopRain()
+	if rainConnection then
+		rainConnection:Disconnect()
+		rainConnection = nil
+	end
+
+	for _, drop in ipairs(rainDrops) do
+		drop.gui:Destroy()
+	end
+
+	table.clear(rainDrops)
+end
+
+local function stopPulse()
+	if pulseConnection then
+		pulseConnection:Disconnect()
+		pulseConnection = nil
+	end
+end
+
+local function removeLightning()
+	if currentLightning then
+		currentLightning:Destroy()
+		currentLightning = nil
+	end
+end
+
+local function getLightningParts(instance: Instance): { BasePart }
+	local parts: { BasePart } = {}
+
+	for _, descendant in ipairs(instance:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			table.insert(parts, descendant)
+		end
+	end
+
+	return parts
+end
+
+local function showLightning()
+	if not active then
+		return
+	end
+
+	removeLightning()
+
+	local lightning = lightningTemplate:Clone()
+	lightning.Name = "StormLightningLocal"
+
+	local parts = getLightningParts(lightning)
+
+	if #parts == 0 then
+		lightning:Destroy()
+		return
+	end
+
+	lightning.Parent = workspace
+
+	local camera = workspace.CurrentCamera
+
+	if not camera then
+		lightning:Destroy()
+		return
+	end
+
+	local cameraCFrame = camera.CFrame
+
+	local distance = math.random(35, 55)
+	local sideOffset = math.random(-20, 20)
+	local verticalOffset = math.random(-8, 8)
+
+	local position =
+		cameraCFrame.Position
+		+ cameraCFrame.LookVector * distance
+		+ cameraCFrame.RightVector * sideOffset
+		+ cameraCFrame.UpVector * verticalOffset
+
+	local targetPosition =
+		position
+		+ Vector3.new(
+			math.random(-4, 4),
+			math.random(-10, -5),
+			math.random(-4, 4)
+		)
+
+	local strikeCFrame =
+		CFrame.lookAt(
+			position,
+			targetPosition
+		)
+
+	if lightning:IsA("Model") then
+		lightning:PivotTo(strikeCFrame)
+	elseif lightning:IsA("BasePart") then
+		lightning.CFrame = strikeCFrame
+	end
+
+	for _, part in ipairs(parts) do
+		part.Transparency = 1
+	end
+
+	currentLightning = lightning
+
+	local flashDelay = math.random(5, 12) / 100
+
+	task.delay(flashDelay, function()
+		if not active or currentLightning ~= lightning then
+			return
+		end
+
+		for _, part in ipairs(parts) do
+			part.Transparency = 0
+		end
+
+		lightningFlash.BackgroundTransparency = 1
+
+		local flashIn = TweenService:Create(
+			lightningFlash,
+			TweenInfo.new(
+				0.025,
+				Enum.EasingStyle.Linear,
+				Enum.EasingDirection.Out
+			),
+			{
+				BackgroundTransparency = 0.82
+			}
+		)
+
+		local flashOut = TweenService:Create(
+			lightningFlash,
+			TweenInfo.new(
+				0.09,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			),
+			{
+				BackgroundTransparency = 1
+			}
+		)
+
+		flashIn:Play()
+
+		flashIn.Completed:Connect(function()
+			if active and currentLightning == lightning then
+				flashOut:Play()
+			end
+		end)
+
+		task.delay(0.16, function()
+			if currentLightning == lightning then
+				removeLightning()
+			end
+		end)
+	end)
+end
+
+local function startLightning()
+	lightningThreadId += 1
+
+	local threadId = lightningThreadId
+
+	task.spawn(function()
+		task.wait(0.18)
+
+		if not active or threadId ~= lightningThreadId then
+			return
+		end
+
+		showLightning()
+
+		while active and threadId == lightningThreadId do
+			task.wait(math.random(45, 75) / 10)
+
+			if not active or threadId ~= lightningThreadId then
+				break
+			end
+
+			showLightning()
+		end
+	end)
+end
+
+local function stopLightning()
+	lightningThreadId += 1
+	removeLightning()
+	lightningFlash.BackgroundTransparency = 1
+end
+
+local function fadeOut()
+	tweenId += 1
+
+	local currentTweenId = tweenId
+
+	stopPulse()
+	stopLightning()
+	stopRain()
+
+	local tintTween = TweenService:Create(
+		tint,
+		TweenInfo.new(
+			0.3,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		),
+		{
+			BackgroundTransparency = 1
+		}
+	)
+
+	local vignetteTween = TweenService:Create(
+		vignette,
+		TweenInfo.new(
+			0.3,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		),
+		{
+			ImageTransparency = 1
+		}
+	)
+
+	local pulseTween = TweenService:Create(
+		pulse,
+		TweenInfo.new(
+			0.3,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		),
+		{
+			BackgroundTransparency = 1
+		}
+	)
+
+	tintTween:Play()
+	vignetteTween:Play()
+	pulseTween:Play()
+
+	pulseTween.Completed:Connect(function()
+		if currentTweenId == tweenId then
+			active = false
+
+			tint.BackgroundTransparency = 1
+			vignette.ImageTransparency = 1
+			pulse.BackgroundTransparency = 1
+			lightningFlash.BackgroundTransparency = 1
+
+			removeLightning()
+		end
+	end)
+end
+
+local function startPulse()
+	stopPulse()
+
+	local startTime = os.clock()
+
+	pulseConnection = RunService.RenderStepped:Connect(function()
+		if not active then
+			return
+		end
+
+		local elapsed = os.clock() - startTime
+
+		local wave =
+			(math.sin(elapsed * 3.2) + 1) / 2
+
+		tint.BackgroundTransparency =
+			0.84 - (wave * 0.035)
+
+		vignette.ImageTransparency =
+			0.55 - (wave * 0.07)
+
+		pulse.BackgroundTransparency =
+			0.94 - (wave * 0.025)
+	end)
+end
+
+local function showStormEffect()
+	tweenId += 1
+
+	active = true
+
+	stopPulse()
+	stopLightning()
+	stopRain()
+	removeLightning()
+
+	tint.BackgroundTransparency = 1
+	vignette.ImageTransparency = 1
+	pulse.BackgroundTransparency = 1
+	lightningFlash.BackgroundTransparency = 1
+
+	local tintTween = TweenService:Create(
+		tint,
+		TweenInfo.new(
+			0.14,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		),
+		{
+			BackgroundTransparency = 0.84
+		}
+	)
+
+	local vignetteTween = TweenService:Create(
+		vignette,
+		TweenInfo.new(
+			0.16,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		),
+		{
+			ImageTransparency = 0.55
+		}
+	)
+
+	local pulseTween = TweenService:Create(
+		pulse,
+		TweenInfo.new(
+			0.14,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		),
+		{
+			BackgroundTransparency = 0.94
+		}
+	)
+
+	tintTween:Play()
+	vignetteTween:Play()
+	pulseTween:Play()
+
+	startRain()
+	startPulse()
+	startLightning()
+end
+
+stormRemote.OnClientEvent:Connect(function(isOutside: boolean)
+	if isOutside then
+		showStormEffect()
+	else
+		fadeOut()
+	end
+end)
+
+player.CharacterAdded:Connect(function()
+	task.wait(0.5)
+
+	removeLightning()
+	lightningFlash.BackgroundTransparency = 1
+
+	if not active then
+		stopRain()
+
+		tint.BackgroundTransparency = 1
+		vignette.ImageTransparency = 1
+		pulse.BackgroundTransparency = 1
+	end
+end)
