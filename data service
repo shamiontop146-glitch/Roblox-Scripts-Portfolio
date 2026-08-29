@@ -1,0 +1,609 @@
+--!strict
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local Vendor = ServerScriptService
+	:WaitForChild("ServerModules")
+	:WaitForChild("Vendor")
+
+local ProfileService = require(
+	Vendor:WaitForChild("ProfileService")
+)
+
+local Remotes = require(
+	ReplicatedStorage
+		:WaitForChild("Shared")
+		:WaitForChild("Remotes")
+)
+
+local dataRemote: RemoteEvent = Remotes.Data
+local requestDataRemote: RemoteEvent = Remotes.RequestData
+
+local DataService = {}
+
+export type PlayerData = {
+	Level: number,
+	Coins: number,
+
+	Inventory: {
+		Skins: { string },
+		Auras: { string },
+		Lassos: { string },
+		DeathEffects: { string },
+		Abilities: { string },
+		Emotes: { string },
+	},
+
+	Equipped: {
+		[string]: string,
+		Ability2: string,
+
+		EmoteSlots: {
+			E1: string,
+			E2: string,
+			E3: string,
+			E4: string,
+			E5: string,
+			E6: string,
+		},
+	},
+
+	Stats: { [string]: number },
+
+	Quests: {
+		Active: { any },
+		LastRefresh: number,
+	},
+
+	Locked: { [string]: boolean },
+}
+
+local PROFILE_TEMPLATE: PlayerData = {
+	Level = 1,
+	Coins = 0,
+
+	Inventory = {
+		Skins = {},
+		Auras = {},
+		Lassos = {
+			"DefaultLasso",
+		},
+		DeathEffects = {},
+
+		Abilities = {
+			"Dash",
+		},
+
+		Emotes = {
+			"TakeL",
+		},
+	},
+
+	Equipped = {
+		Skin = "",
+		Aura = "",
+		Lasso = "DefaultLasso",
+		DeathEffect = "",
+		Ability = "Dash",
+		Ability2 = "",
+
+		EmoteSlots = {
+			E1 = "",
+			E2 = "",
+			E3 = "",
+			E4 = "",
+			E5 = "",
+			E6 = "",
+		},
+	},
+
+	Stats = {
+		Wins = 0,
+		Kills = 0,
+		Deaths = 0,
+	},
+
+	Quests = {
+		Active = {},
+		LastRefresh = 0,
+	},
+
+	Locked = {},
+}
+
+local ProfileStore = ProfileService.GetProfileStore(
+	"PlayerData_v1",
+	PROFILE_TEMPLATE
+)
+
+local profiles: { [Player]: any } = {}
+local loading: { [Player]: boolean } = {}
+
+local DEFAULT_ABILITIES = {
+	"Dash",
+}
+
+local DEFAULT_LASSO = "DefaultLasso"
+
+local function ensureDefaultAbilities(
+	profileData: PlayerData
+)
+	if not profileData.Inventory then
+		profileData.Inventory = {
+			Skins = {},
+			Auras = {},
+			Lassos = {},
+			DeathEffects = {},
+			Abilities = {},
+			Emotes = {},
+		}
+	end
+
+	if not profileData.Inventory.Abilities then
+		profileData.Inventory.Abilities = {}
+	end
+
+	for _, abilityId in ipairs(
+		DEFAULT_ABILITIES
+		) do
+		if not table.find(
+			profileData.Inventory.Abilities,
+			abilityId
+			) then
+			table.insert(
+				profileData.Inventory.Abilities,
+				abilityId
+			)
+		end
+	end
+end
+
+local function ensureDefaultEmotes(
+	profileData: PlayerData
+)
+	if not profileData.Inventory then
+		profileData.Inventory = {
+			Skins = {},
+			Auras = {},
+			Lassos = {},
+			DeathEffects = {},
+			Abilities = {},
+			Emotes = {},
+		}
+	end
+
+	if not profileData.Inventory.Emotes then
+		profileData.Inventory.Emotes = {}
+	end
+
+	if not table.find(
+		profileData.Inventory.Emotes,
+		"TakeL"
+		) then
+		table.insert(
+			profileData.Inventory.Emotes,
+			"TakeL"
+		)
+	end
+
+	if not profileData.Equipped then
+		profileData.Equipped = {
+			Skin = "",
+			Aura = "",
+			Lasso = "",
+			DeathEffect = "",
+			Ability = "Dash",
+			Ability2 = "",
+			EmoteSlots = {
+				E1 = "",
+				E2 = "",
+				E3 = "",
+				E4 = "",
+				E5 = "",
+				E6 = "",
+			},
+		}
+	end
+
+	if not profileData.Equipped.Ability2 then
+		profileData.Equipped.Ability2 = ""
+	end
+
+	if not profileData.Equipped.EmoteSlots then
+		profileData.Equipped.EmoteSlots = {
+			E1 = "",
+			E2 = "",
+			E3 = "",
+			E4 = "",
+			E5 = "",
+			E6 = "",
+		}
+	end
+end
+
+local function ensureDefaultLasso(
+	profileData: PlayerData
+)
+	if not profileData.Inventory then
+		profileData.Inventory = {
+			Skins = {},
+			Auras = {},
+			Lassos = {},
+			DeathEffects = {},
+			Abilities = {},
+			Emotes = {},
+		}
+	end
+
+	if not profileData.Inventory.Lassos then
+		profileData.Inventory.Lassos = {}
+	end
+
+	if not table.find(
+		profileData.Inventory.Lassos,
+		DEFAULT_LASSO
+		) then
+		table.insert(
+			profileData.Inventory.Lassos,
+			DEFAULT_LASSO
+		)
+	end
+
+	if not profileData.Equipped then
+		profileData.Equipped = {
+			Skin = "",
+			Aura = "",
+			Lasso = DEFAULT_LASSO,
+			DeathEffect = "",
+			Ability = "Dash",
+			Ability2 = "",
+			EmoteSlots = {
+				E1 = "",
+				E2 = "",
+				E3 = "",
+				E4 = "",
+				E5 = "",
+				E6 = "",
+			},
+		}
+	else
+		if type(profileData.Equipped.Lasso) ~= "string"
+			or profileData.Equipped.Lasso == ""
+		then
+			profileData.Equipped.Lasso =
+				DEFAULT_LASSO
+		end
+	end
+end
+
+local function replicate(
+	player: Player
+)
+	local profile = profiles[player]
+
+	if profile then
+		dataRemote:FireClient(
+			player,
+			profile.Data
+		)
+	end
+end
+
+local function requestData(
+	player: Player
+)
+	local profile = profiles[player]
+
+	if profile then
+		dataRemote:FireClient(
+			player,
+			profile.Data
+		)
+	end
+end
+
+requestDataRemote.OnServerEvent:Connect(
+	requestData
+)
+
+local function onPlayerAdded(
+	player: Player
+)
+	if profiles[player]
+		or loading[player]
+	then
+		return
+	end
+
+	loading[player] = true
+
+	local profile =
+		ProfileStore:LoadProfileAsync(
+			"Player_"
+			.. tostring(player.UserId)
+		)
+
+	loading[player] = nil
+
+	if not profile then
+		player:Kick(
+			"Data failed to load. Please rejoin."
+		)
+
+		return
+	end
+
+	profile:AddUserId(
+		player.UserId
+	)
+
+	profile:Reconcile()
+
+	ensureDefaultAbilities(
+		profile.Data
+	)
+
+	ensureDefaultEmotes(
+		profile.Data
+	)
+
+	ensureDefaultLasso(
+		profile.Data
+	)
+
+	profile:ListenToRelease(
+		function()
+			profiles[player] = nil
+
+			player:Kick(
+				"Data session ended. Please rejoin."
+			)
+		end
+	)
+
+	if player:IsDescendantOf(
+		Players
+		) then
+		profiles[player] = profile
+
+		replicate(player)
+	else
+		profile:Release()
+	end
+end
+
+local function onPlayerRemoving(
+	player: Player
+)
+	local profile =
+		profiles[player]
+
+	if profile then
+		profile:Release()
+	end
+end
+
+function DataService.getData(
+	player: Player
+): PlayerData?
+	local profile =
+		profiles[player]
+
+	if profile then
+		return profile.Data
+	end
+
+	return nil
+end
+
+function DataService.isLoaded(
+	player: Player
+): boolean
+	return profiles[player] ~= nil
+end
+
+function DataService.getCoins(
+	player: Player
+): number
+	local profile =
+		profiles[player]
+
+	if profile then
+		return profile.Data.Coins
+	end
+
+	return 0
+end
+
+function DataService.addCoins(
+	player: Player,
+	amount: number
+)
+	local profile =
+		profiles[player]
+
+	if not profile then
+		return
+	end
+
+	profile.Data.Coins =
+		math.max(
+			0,
+			profile.Data.Coins + amount
+		)
+
+	replicate(player)
+end
+
+function DataService.incrementStat(
+	player: Player,
+	stat: string,
+	amount: number
+)
+	local profile =
+		profiles[player]
+
+	if not profile then
+		return
+	end
+
+	if profile.Data.Stats[stat] ~= nil then
+		profile.Data.Stats[stat] += amount
+
+		replicate(player)
+	end
+end
+
+function DataService.update(
+	player: Player,
+	mutator: (PlayerData) -> ()
+)
+	local profile =
+		profiles[player]
+
+	if not profile then
+		return
+	end
+
+	mutator(
+		profile.Data
+	)
+
+	replicate(player)
+end
+
+function DataService.setEmoteSlot(
+	player: Player,
+	slot: string,
+	emoteId: string
+): boolean
+	local profile =
+		profiles[player]
+
+	if not profile then
+		return false
+	end
+
+	if slot ~= "E1"
+		and slot ~= "E2"
+		and slot ~= "E3"
+		and slot ~= "E4"
+		and slot ~= "E5"
+		and slot ~= "E6"
+	then
+		return false
+	end
+
+	if not profile.Data.Inventory.Emotes then
+		profile.Data.Inventory.Emotes = {}
+	end
+
+	if not table.find(
+		profile.Data.Inventory.Emotes,
+		emoteId
+		) then
+		return false
+	end
+
+	if not profile.Data.Equipped.EmoteSlots then
+		profile.Data.Equipped.EmoteSlots = {
+			E1 = "",
+			E2 = "",
+			E3 = "",
+			E4 = "",
+			E5 = "",
+			E6 = "",
+		}
+	end
+
+	profile.Data.Equipped.EmoteSlots[slot] =
+		emoteId
+
+	replicate(player)
+
+	return true
+end
+
+function DataService.setAbilitySlot(
+	player: Player,
+	slot: number,
+	abilityId: string
+): boolean
+	local profile =
+		profiles[player]
+
+	if not profile then
+		return false
+	end
+
+	if slot ~= 1
+		and slot ~= 2
+	then
+		return false
+	end
+
+	if not profile.Data.Inventory.Abilities then
+		profile.Data.Inventory.Abilities = {}
+	end
+
+	if not table.find(
+		profile.Data.Inventory.Abilities,
+		abilityId
+		) then
+		return false
+	end
+
+	if not profile.Data.Equipped then
+		return false
+	end
+
+	if slot == 1 then
+		profile.Data.Equipped.Ability =
+			abilityId
+	else
+		profile.Data.Equipped.Ability2 =
+			abilityId
+	end
+
+	replicate(player)
+
+	return true
+end
+
+function DataService.init()
+	Players.PlayerRemoving:Connect(
+		onPlayerRemoving
+	)
+
+	game:BindToClose(
+		function()
+			for _, player in ipairs(
+				Players:GetPlayers()
+				) do
+				task.spawn(
+					onPlayerRemoving,
+					player
+				)
+			end
+		end
+	)
+end
+
+function DataService.start()
+	Players.PlayerAdded:Connect(
+		onPlayerAdded
+	)
+
+	for _, player in ipairs(
+		Players:GetPlayers()
+		) do
+		task.spawn(
+			onPlayerAdded,
+			player
+		)
+	end
+end
+
+return DataService
